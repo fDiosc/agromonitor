@@ -1,0 +1,165 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== TALHÕES ====================
+
+model Field {
+  id              String    @id @default(cuid())
+  name            String
+  crop            String    @default("SOJA")
+  seasonStartDate DateTime
+  status          String    @default("PENDING") // PENDING, PROCESSING, SUCCESS, ERROR
+  errorMessage    String?
+
+  // Localização
+  city      String?
+  state     String?
+  latitude  Float?
+  longitude Float?
+  areaHa    Float?
+
+  // Geometria (JSON armazenado como string)
+  geometryJson String // GeoJSON stringified
+
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  processedAt DateTime?
+
+  // Relações
+  agroData AgroData?
+  analyses Analysis[]
+  ndviData NdviDataPoint[]
+}
+
+// ==================== DADOS AGRONÔMICOS (BASE) ====================
+// Dados que são sempre os mesmos, independente do template
+
+model AgroData {
+  id String @id @default(cuid())
+
+  // Métricas base
+  areaHa            Float?
+  volumeEstimatedKg Float?
+
+  // Fenologia detectada
+  plantingDate          DateTime?
+  sosDate               DateTime?
+  eosDate               DateTime?
+  peakDate              DateTime?
+  cycleDays             Int?
+  phenologyMethod       String? // ALGORITHM | PROJECTION
+  confidenceScore       Int?
+  confidence            String? // HIGH | MEDIUM | LOW
+  historicalCorrelation Float?
+
+  // Detecções avançadas
+  detectedReplanting Boolean   @default(false)
+  replantingDate     DateTime?
+  yieldEstimateKgHa  Float? // Produtividade estimada kg/ha
+  phenologyHealth    String? // EXCELLENT | GOOD | FAIR | POOR
+  peakNdvi           Float? // NDVI máximo detectado
+
+  // Dados brutos da API Merx (JSON stringified)
+  rawNdviData       String?
+  rawPrecipData     String?
+  rawSoilData       String?
+  rawHistoricalData String?
+  rawAreaData       String?
+  rawZarcData       String?
+
+  // Diagnósticos do processamento
+  diagnostics String? // JSON array of diagnostics
+
+  // Relação 1:1 com Field
+  fieldId String @unique
+  field   Field  @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ==================== ANÁLISES POR TEMPLATE ====================
+
+model Analysis {
+  id String @id @default(cuid())
+
+  // Template usado
+  templateId      String // CREDIT | LOGISTICS | RISK_MATRIX
+  templateVersion String @default("1.0.0")
+
+  // Status da análise
+  status      String // NORMAL | ALERTA | CRITICO (ou equivalente do template)
+  statusLabel String? // Label customizado do template
+  statusColor String? // Cor para UI (green, yellow, red)
+
+  // Resultado da IA
+  aiSummary         String?
+  aiMetrics         String? // JSON - métricas específicas do template
+  aiRisks           String? // JSON array
+  aiRecommendations String? // JSON array
+  aiFullResponse    String? // JSON completo da resposta
+
+  // Metadados
+  promptVersion    String?
+  modelUsed        String?
+  processingTimeMs Int?
+  fallbackUsed     Boolean @default(false)
+
+  // Relação com Field
+  fieldId String
+  field   Field  @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([fieldId, templateId])
+  @@index([fieldId, templateId])
+}
+
+// ==================== TEMPLATES DE ANÁLISE ====================
+
+model AnalysisTemplate {
+  id          String  @id // CREDIT, LOGISTICS, RISK_MATRIX
+  name        String // "Análise de Crédito"
+  description String?
+  icon        String? // Nome do ícone (lucide)
+  color       String? // Cor tema
+
+  // Configuração
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  // Schema de métricas (JSON)
+  metricsSchema String? // Define quais métricas esse template gera
+
+  // Versão atual
+  currentVersion String @default("1.0.0")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ==================== SÉRIES TEMPORAIS ====================
+
+model NdviDataPoint {
+  id           String   @id @default(cuid())
+  date         DateTime
+  ndviRaw      Float?
+  ndviSmooth   Float?
+  ndviInterp   Float?
+  cloudCover   Float?
+  isHistorical Boolean  @default(false)
+  seasonYear   Int?
+
+  fieldId String
+  field   Field  @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  @@unique([fieldId, date, seasonYear])
+  @@index([fieldId, date])
+}

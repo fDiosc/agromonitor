@@ -1,0 +1,124 @@
+/**
+ * AI Service
+ * Integração com Google Gemini para análises baseadas em templates
+ */
+
+import { GoogleGenerativeAI } from '@google/genai'
+import { getTemplate } from '@/lib/templates'
+import type { AnalysisContext, AnalysisResult } from '@/lib/templates/types'
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || ''
+const MODEL_NAME = 'gemini-2.0-flash'
+
+interface AIServiceConfig {
+  maxRetries: number
+  timeoutMs: number
+  temperature: number
+}
+
+const DEFAULT_CONFIG: AIServiceConfig = {
+  maxRetries: 2,
+  timeoutMs: 30000,
+  temperature: 0.3
+}
+
+/**
+ * Executa análise de IA para um template específico
+ */
+export async function runAnalysis(
+  templateId: string,
+  context: AnalysisContext,
+  config: Partial<AIServiceConfig> = {}
+): Promise<{
+  result: AnalysisResult
+  fallbackUsed: boolean
+  processingTimeMs: number
+  modelUsed: string
+}> {
+  const startTime = Date.now()
+  const { maxRetries, temperature } = { ...DEFAULT_CONFIG, ...config }
+
+  // Buscar template
+  const template = getTemplate(templateId)
+  if (!template) {
+    throw new Error(`Template not found: ${templateId}`)
+  }
+
+  // Verificar API key
+  if (!GEMINI_API_KEY) {
+    console.warn('Gemini API key not configured, using fallback')
+    return {
+      result: template.getFallbackResult(context),
+      fallbackUsed: true,
+      processingTimeMs: Date.now() - startTime,
+      modelUsed: 'fallback'
+    }
+  }
+
+  // Tentar análise com IA
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
+      const model = genAI.getGenerativeModel({
+        model: MODEL_NAME,
+        generationConfig: {
+          temperature,
+          responseMimeType: 'application/json'
+        },
+        systemInstruction: template.buildSystemPrompt()
+      })
+
+      const userPrompt = template.buildUserPrompt(context)
+      const result = await model.generateContent(userPrompt)
+      const response = result.response
+      const text = response.text()
+
+      // Parsear resposta
+      const parsed = template.parseResponse(text)
+
+      return {
+        result: parsed,
+        fallbackUsed: false,
+        processingTimeMs: Date.now() - startTime,
+        modelUsed: MODEL_NAME
+      }
+    } catch (error) {
+      console.error(`AI analysis attempt ${attempt + 1} failed:`, error)
+
+      if (attempt < maxRetries) {
+        // Exponential backoff
+        await delay(Math.pow(2, attempt) * 1000)
+        continue
+      }
+    }
+  }
+
+  // Fallback se todas as tentativas falharem
+  console.warn('All AI attempts failed, using fallback')
+  return {
+    result: template.getFallbackResult(context),
+    fallbackUsed: true,
+    processingTimeMs: Date.now() - startTime,
+    modelUsed: 'fallback'
+  }
+}
+
+/**
+ * Verifica se o serviço de IA está disponível
+ */
+export async function checkAIAvailability(): Promise<boolean> {
+  if (!GEMINI_API_KEY) return false
+
+  try {
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
+    const model = genAI.getGenerativeModel({ model: MODEL_NAME })
+    await model.generateContent('test')
+    return true
+  } catch {
+    return false
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
