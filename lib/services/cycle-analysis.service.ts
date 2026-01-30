@@ -770,7 +770,7 @@ export function prepareHistoricalOverlayData(
   
   // FILTRAR: Manter apenas pontos dentro do range relevante
   // Começar 15 dias antes do primeiro dado atual
-  // Terminar na data de EOS ou 60 dias após último dado atual
+  // Terminar baseado em: dados disponíveis, EOS, ou projeção futura
   const firstCurrentDate = sorted[0]?.date
   const lastCurrentDate = sorted[sorted.length - 1]?.date
   
@@ -779,21 +779,49 @@ export function prepareHistoricalOverlayData(
     rangeStart.setDate(rangeStart.getDate() - 15)
     const rangeStartStr = rangeStart.toISOString().split('T')[0]
     
+    const lastCurrentTime = new Date(lastCurrentDate).getTime()
+    const today = new Date()
+    const todayTime = today.getTime()
+    
+    // Encontrar a data mais distante com dados disponíveis (atual ou histórico)
+    let maxAvailableDate = lastCurrentTime
+    dateMap.forEach((entry, dateStr) => {
+      const dateTime = new Date(dateStr).getTime()
+      const hasData = entry.current !== undefined || 
+                      entry.h1 !== undefined || 
+                      entry.h2 !== undefined || 
+                      entry.h3 !== undefined
+      if (hasData && dateTime > maxAvailableDate) {
+        maxAvailableDate = dateTime
+      }
+    })
+    
+    // Determinar rangeEnd baseado em múltiplos critérios
     let rangeEnd: Date
+    const dayMs = 24 * 60 * 60 * 1000
+    
     if (eosDate) {
-      rangeEnd = new Date(eosDate)
-      rangeEnd.setDate(rangeEnd.getDate() + 7) // 7 dias após EOS
+      const eosTime = new Date(eosDate).getTime()
+      const eosPlus30 = eosTime + (30 * dayMs) // 30 dias após EOS para ver senescência completa
+      
+      // Escolher o maior entre: EOS+30, dados disponíveis+7, ou hoje+7
+      const candidates = [
+        eosPlus30,
+        maxAvailableDate + (7 * dayMs),
+        todayTime + (7 * dayMs)
+      ]
+      rangeEnd = new Date(Math.max(...candidates))
     } else {
-      rangeEnd = new Date(lastCurrentDate)
-      rangeEnd.setDate(rangeEnd.getDate() + 60) // 60 dias após último dado
+      // Sem EOS: usar 60 dias após último dado ou dados disponíveis
+      const lastPlus60 = lastCurrentTime + (60 * dayMs)
+      rangeEnd = new Date(Math.max(lastPlus60, maxAvailableDate + (7 * dayMs)))
     }
+    
     const rangeEndStr = rangeEnd.toISOString().split('T')[0]
     
     // Garantir que existam pontos intermediários para projeção
     // Criar pontos a cada 1 dia do último dado até o fim do range
-    const lastCurrentTime = new Date(lastCurrentDate).getTime()
     const rangeEndTime = rangeEnd.getTime()
-    const dayMs = 24 * 60 * 60 * 1000
     
     for (let t = lastCurrentTime + dayMs; t <= rangeEndTime; t += dayMs) {
       const dateStr = new Date(t).toISOString().split('T')[0]
