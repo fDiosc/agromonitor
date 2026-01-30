@@ -64,9 +64,15 @@ COPY --from=builder /app/public ./public/
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Copy Prisma files for runtime
+# Copy Prisma files for runtime (client and schema for db push)
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+
+# Copy start script and set permissions
+COPY --from=builder /app/start.sh ./start.sh
+RUN chmod +x ./start.sh && chown nextjs:nodejs ./start.sh
 
 # Switch to non-root user
 USER nextjs
@@ -81,5 +87,5 @@ ENV HOSTNAME="0.0.0.0"
 # HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 #   CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
 
-# Start the application
-CMD ["node", "server.js"]
+# Start the application with Prisma db push
+CMD ["sh", "start.sh"]
