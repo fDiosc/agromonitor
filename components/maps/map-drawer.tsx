@@ -268,7 +268,8 @@ export function MapDrawer({
         isInitializedRef.current = false
       }
     }
-  }, []) // Array vazio - executar apenas uma vez
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Array vazio - inicializar mapa apenas uma vez (initialCenter/Zoom são valores iniciais)
 
   // Busca
   const handleSearch = async (query?: string) => {
