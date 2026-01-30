@@ -35,7 +35,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 # Placeholder DATABASE_URL for build time (Prisma needs it to generate client)
 # The real DATABASE_URL is set at runtime via CapRover environment variables
-ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
+ENV DATABASE_URL="postgresql://neondb_owner:npg_EYNaZi9Ag0xj@ep-misty-river-ahqsmptq-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require" 
 
 # Generate Prisma client
 RUN npx prisma generate
