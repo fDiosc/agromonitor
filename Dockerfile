@@ -2,7 +2,7 @@
 # MERX AGRO MONITOR - Dockerfile for CapRover
 # ==========================================
 
-FROM node:18-slim AS base
+FROM node:20-slim AS base
 
 # Install dependencies for Prisma and health checks
 RUN apt-get update && apt-get install -y openssl procps && rm -rf /var/lib/apt/lists/*
@@ -52,8 +52,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy public assets
-COPY --from=builder /app/public ./public
+# Copy public assets (create empty dir if not exists)
+RUN mkdir -p ./public
+COPY --from=builder /app/public ./public/
 
 # Copy standalone build output
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
