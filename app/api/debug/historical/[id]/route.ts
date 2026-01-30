@@ -95,7 +95,7 @@ export async function GET(
       sosDate: field.agroData.sosDate?.toISOString().split('T')[0],
       eosDate: field.agroData.eosDate?.toISOString().split('T')[0],
       plantingDate: field.agroData.plantingDate?.toISOString().split('T')[0],
-      method: field.agroData.method
+      phenologyMethod: field.agroData.phenologyMethod
     } : null
 
     return NextResponse.json({
