@@ -33,6 +33,10 @@ COPY . .
 # Disable Next.js telemetry
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Placeholder DATABASE_URL for build time (Prisma needs it to generate client)
+# The real DATABASE_URL is set at runtime via CapRover environment variables
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
+
 # Generate Prisma client
 RUN npx prisma generate
 

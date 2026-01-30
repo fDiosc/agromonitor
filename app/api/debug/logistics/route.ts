@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { differenceInDays, addDays, format } from 'date-fns'
 
+// Force dynamic to prevent static generation during build
+export const dynamic = 'force-dynamic'
+
 const HARVEST_CAPACITY_HA_PER_DAY = 50
 
 export async function GET() {
