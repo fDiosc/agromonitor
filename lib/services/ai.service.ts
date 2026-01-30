@@ -3,7 +3,7 @@
  * Integração com Google Gemini para análises baseadas em templates
  */
 
-import { GoogleGenerativeAI } from '@google/genai'
+import { GoogleGenAI } from '@google/genai'
 import { getTemplate } from '@/lib/templates'
 import type { AnalysisContext, AnalysisResult } from '@/lib/templates/types'
 
@@ -36,7 +36,7 @@ export async function runAnalysis(
   modelUsed: string
 }> {
   const startTime = Date.now()
-  const { maxRetries, temperature } = { ...DEFAULT_CONFIG, ...config }
+  const { maxRetries } = { ...DEFAULT_CONFIG, ...config }
 
   // Buscar template
   const template = getTemplate(templateId)
@@ -58,20 +58,21 @@ export async function runAnalysis(
   // Tentar análise com IA
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
-      const model = genAI.getGenerativeModel({
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY })
+      
+      const systemPrompt = template.buildSystemPrompt()
+      const userPrompt = template.buildUserPrompt(context)
+      
+      const response = await ai.models.generateContent({
         model: MODEL_NAME,
-        generationConfig: {
-          temperature,
-          responseMimeType: 'application/json'
-        },
-        systemInstruction: template.buildSystemPrompt()
+        contents: userPrompt,
+        config: {
+          systemInstruction: systemPrompt,
+          responseMimeType: 'application/json',
+        }
       })
 
-      const userPrompt = template.buildUserPrompt(context)
-      const result = await model.generateContent(userPrompt)
-      const response = result.response
-      const text = response.text()
+      const text = response.text || ''
 
       // Parsear resposta
       const parsed = template.parseResponse(text)
@@ -110,9 +111,11 @@ export async function checkAIAvailability(): Promise<boolean> {
   if (!GEMINI_API_KEY) return false
 
   try {
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
-    const model = genAI.getGenerativeModel({ model: MODEL_NAME })
-    await model.generateContent('test')
+    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY })
+    await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: 'test'
+    })
     return true
   } catch {
     return false

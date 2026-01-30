@@ -54,7 +54,7 @@ export async function POST(
         name: field.name,
         city: field.city || 'Desconhecida',
         state: field.state || 'Desconhecido',
-        crop: field.crop,
+        cropType: field.cropType,
         areaHa: field.areaHa || 0,
         seasonStartDate: field.seasonStartDate.toISOString().split('T')[0]
       },

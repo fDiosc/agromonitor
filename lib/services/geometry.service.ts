@@ -181,7 +181,7 @@ function parseKML(content: string): {
     const rawCoords = match[1].trim().split(/\s+/)
     const coords: [number, number][] = rawCoords.map(r => {
       const parts = r.split(',')
-      return [parseFloat(parts[0]), parseFloat(parts[1])]
+      return [parseFloat(parts[0]), parseFloat(parts[1])] as [number, number]
     }).filter(c => !isNaN(c[0]) && !isNaN(c[1]))
 
     const geojson = createGeoJSON(coords)

@@ -28,7 +28,7 @@ async function debugChartData(fieldId: string) {
   }
   
   console.log('📍 Campo:', field.name)
-  console.log('🌱 Cultura:', field.crop)
+  console.log('🌱 Cultura:', field.cropType)
   console.log('')
   
   // Dados agro
@@ -90,17 +90,17 @@ async function debugChartData(fieldId: string) {
   // Testar prepareHistoricalOverlayData
   const currentNdviPoints: NdviPoint[] = field.ndviData.map(d => ({
     date: d.date.toISOString().split('T')[0],
-    ndvi_raw: d.ndviRaw,
-    ndvi_interp: d.ndviInterp,
-    ndvi_smooth: d.ndviSmooth
+    ndvi_raw: d.ndviRaw ?? undefined,
+    ndvi_interp: d.ndviInterp ?? undefined,
+    ndvi_smooth: d.ndviSmooth ?? undefined
   }))
   
   const historicalNdviPoints: NdviPoint[][] = Object.values(bySeason).map(season =>
     season.map(d => ({
       date: d.date.toISOString().split('T')[0],
-      ndvi_raw: d.ndviRaw,
-      ndvi_interp: d.ndviInterp,
-      ndvi_smooth: d.ndviSmooth
+      ndvi_raw: d.ndviRaw ?? undefined,
+      ndvi_interp: d.ndviInterp ?? undefined,
+      ndvi_smooth: d.ndviSmooth ?? undefined
     }))
   )
   
@@ -109,7 +109,7 @@ async function debugChartData(fieldId: string) {
     currentNdviPoints,
     historicalNdviPoints,
     field.agroData?.sosDate?.toISOString().split('T')[0] || null,
-    field.crop || 'SOJA',
+    field.cropType || 'SOJA',
     field.agroData?.eosDate?.toISOString().split('T')[0] || null,
     field.agroData?.plantingDate?.toISOString().split('T')[0] || null
   )

@@ -70,6 +70,105 @@ function getDayOfYear(date: Date): number {
   return Math.floor(diff / (1000 * 60 * 60 * 24))
 }
 
+/**
+ * Regressão Linear Simples (Mínimos Quadrados Ordinários)
+ * Retorna slope, intercept e R²
+ */
+function linearRegression(points: { x: number; y: number }[]): {
+  slope: number
+  intercept: number
+  rSquared: number
+} | null {
+  const n = points.length
+  if (n < 3) return null
+
+  const sumX = points.reduce((s, p) => s + p.x, 0)
+  const sumY = points.reduce((s, p) => s + p.y, 0)
+  const meanX = sumX / n
+  const meanY = sumY / n
+
+  let ssXY = 0
+  let ssXX = 0
+  let ssYY = 0
+
+  points.forEach(p => {
+    const dx = p.x - meanX
+    const dy = p.y - meanY
+    ssXY += dx * dy
+    ssXX += dx * dx
+    ssYY += dy * dy
+  })
+
+  if (ssXX === 0) return null
+
+  const slope = ssXY / ssXX
+  const intercept = meanY - slope * meanX
+  const rSquared = ssYY > 0 ? Math.pow(ssXY, 2) / (ssXX * ssYY) : 0
+
+  return { slope, intercept, rSquared }
+}
+
+/**
+ * Detecta fase fenológica baseada na tendência dos últimos N pontos
+ * Retorna: 'vegetative' | 'reproductive' | 'senescence'
+ */
+function detectPhenologicalPhase(
+  data: NdviPoint[],
+  windowDays: number = 14
+): {
+  phase: 'vegetative' | 'reproductive' | 'senescence'
+  trend: { slope: number; intercept: number; rSquared: number } | null
+  confidence: number
+} {
+  if (data.length < 5) {
+    return { phase: 'reproductive', trend: null, confidence: 0 }
+  }
+
+  // Pegar últimos N dias
+  const sorted = [...data]
+    .filter(d => d.ndvi_smooth !== null && d.ndvi_smooth !== undefined)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  const lastN = sorted.slice(-windowDays)
+  if (lastN.length < 5) {
+    return { phase: 'reproductive', trend: null, confidence: 0 }
+  }
+
+  const baseTime = new Date(lastN[0].date).getTime()
+  const dayMs = 24 * 60 * 60 * 1000
+
+  const regressionPoints = lastN.map(p => ({
+    x: (new Date(p.date).getTime() - baseTime) / dayMs,
+    y: p.ndvi_smooth || p.ndvi_interp || 0
+  }))
+
+  const trend = linearRegression(regressionPoints)
+  if (!trend) {
+    return { phase: 'reproductive', trend: null, confidence: 0 }
+  }
+
+  // Determinar fase baseada no slope e R²
+  // slope > 0.005/dia = vegetativo (subindo)
+  // slope < -0.005/dia = senescência (caindo)
+  // entre -0.005 e 0.005 = reprodutivo (platô)
+  const SLOPE_THRESHOLD = 0.005
+
+  let phase: 'vegetative' | 'reproductive' | 'senescence'
+  let confidence = trend.rSquared * 100
+
+  if (trend.slope > SLOPE_THRESHOLD && trend.rSquared > 0.5) {
+    phase = 'vegetative'
+  } else if (trend.slope < -SLOPE_THRESHOLD && trend.rSquared > 0.5) {
+    phase = 'senescence'
+    confidence = Math.min(100, confidence * 1.2) // Boost para senescência clara
+  } else {
+    phase = 'reproductive'
+    confidence = Math.max(30, confidence * 0.7) // Reduzir confiança em platô
+  }
+
+  return { phase, trend, confidence }
+}
+
 function movingAverage(data: number[], window: number): number[] {
   const result: number[] = []
   for (let i = 0; i < data.length; i++) {
@@ -743,18 +842,27 @@ export function prepareHistoricalOverlayData(
     })
   }
   
+  // ==================== MODELO ADAPTATIVO DE PROJEÇÃO ====================
+  // Detectar fase fenológica e tendência atual
+  const phaseDetection = detectPhenologicalPhase(currentData)
+  
   // Gerar projeção a partir do último ponto atual até o fim
   if (lastCurrentIdx >= 0 && lastCurrentIdx < chartData.length - 1) {
     // Primeiro ponto da projeção = último valor atual (para continuidade)
     chartData[lastCurrentIdx].projection = lastCurrentValue
     
-    // Calcular curva de projeção típica
-    // Baseado no ciclo fenológico: plateau -> senescência -> colheita
-    const remainingPoints = chartData.length - lastCurrentIdx - 1
+    // Calcular base time para projeção linear
+    const lastCurrentDate = chartData[lastCurrentIdx].date
+    const baseTime = new Date(lastCurrentDate).getTime()
+    const dayMs = 24 * 60 * 60 * 1000
+    
+    // Parâmetros para modelo de senescência
+    const MIN_NDVI = 0.18 // Solo + palha residual
+    const slope = phaseDetection.trend?.slope || -0.01
     
     for (let i = lastCurrentIdx + 1; i < chartData.length; i++) {
       const entry = chartData[i]
-      const progressIdx = i - lastCurrentIdx
+      const daysFromLast = (new Date(entry.date).getTime() - baseTime) / dayMs
       
       // Calcular média dos históricos disponíveis neste ponto
       const historicalValues: number[] = []
@@ -763,33 +871,88 @@ export function prepareHistoricalOverlayData(
           historicalValues.push(entry[key])
         }
       })
+      const historicalAvg = historicalValues.length > 0
+        ? historicalValues.reduce((a, b) => a + b, 0) / historicalValues.length
+        : null
       
-      if (historicalValues.length > 0) {
-        // Usar média histórica
-        entry.projection = historicalValues.reduce((a, b) => a + b, 0) / historicalValues.length
-      } else {
-        // Modelo de senescência típico (curva logística inversa)
-        // Fase 1 (0-30%): manutenção/platô
-        // Fase 2 (30-80%): senescência acelerada
-        // Fase 3 (80-100%): estabilização baixa
-        const progress = progressIdx / remainingPoints
+      // ==================== LÓGICA ADAPTATIVA POR FASE ====================
+      if (phaseDetection.phase === 'senescence') {
+        // SENESCÊNCIA: Modelo de decaimento exponencial suavizado
+        // Fórmula: NDVI(t) = MIN_NDVI + (NDVI_0 - MIN_NDVI) * e^(-k*t)
+        // onde k é derivado do slope observado
         
-        let decay: number
-        if (progress < 0.3) {
-          // Platô - pequeno declínio
-          decay = progress * 0.1
-        } else if (progress < 0.8) {
-          // Senescência principal
-          const senProgress = (progress - 0.3) / 0.5
-          decay = 0.03 + senProgress * 0.6
+        // Converter slope linear para taxa de decaimento exponencial
+        // Se slope = -0.0175 (1.75%/dia), k ≈ |slope| / NDVI_atual
+        const decayRate = Math.abs(slope) / Math.max(0.3, lastCurrentValue - MIN_NDVI)
+        
+        // Calcular projeção exponencial (converge suavemente para MIN_NDVI)
+        const exponentialProjection = MIN_NDVI + (lastCurrentValue - MIN_NDVI) * Math.exp(-decayRate * daysFromLast)
+        
+        // Também calcular tendência linear para comparação
+        const linearProjection = lastCurrentValue + slope * daysFromLast
+        
+        // Usar o MÍNIMO entre exponencial e histórico (se disponível)
+        // Mas garantir que seja maior que MIN_NDVI e menor que linear (não pode acelerar além da tendência)
+        let projection: number
+        
+        if (historicalAvg !== null && historicalAvg < exponentialProjection) {
+          // Histórico está caindo mais rápido - usar histórico
+          projection = historicalAvg
         } else {
-          // Estabilização
-          const finalProgress = (progress - 0.8) / 0.2
-          decay = 0.63 + finalProgress * 0.15
+          // Usar projeção exponencial (suaviza a curva)
+          projection = exponentialProjection
         }
         
-        entry.projection = Math.max(0.2, lastCurrentValue * (1 - decay))
+        // Limitar: não pode subir e não pode cair abaixo de MIN_NDVI
+        entry.projection = Math.max(MIN_NDVI, Math.min(projection, lastCurrentValue))
+      } else if (phaseDetection.phase === 'vegetative') {
+        // VEGETATIVO: Projeção com limite biológico
+        // A planta não pode crescer indefinidamente - atinge platô em NDVI ~0.85-0.95
+        
+        const MAX_NDVI_PLATEAU = 0.92 // Limite superior realístico
+        const trendProjection = Math.min(MAX_NDVI_PLATEAU, lastCurrentValue + slope * daysFromLast)
+        
+        // Se já estamos próximos do platô (NDVI > 0.80), dar mais peso ao histórico
+        // porque o histórico mostra quando começa a senescência
+        const nearPlateau = lastCurrentValue > 0.80
+        
+        if (historicalAvg !== null) {
+          if (nearPlateau) {
+            // Próximo do platô: usar mínimo entre tendência e histórico
+            // porque a planta vai começar a cair em breve
+            entry.projection = Math.min(trendProjection, Math.max(historicalAvg, MIN_NDVI))
+          } else {
+            // Ainda crescendo: blend com mais peso na tendência
+            entry.projection = 0.6 * trendProjection + 0.4 * historicalAvg
+          }
+        } else {
+          // Sem histórico: usar tendência com limite
+          entry.projection = trendProjection
+        }
+        // Limitar entre 0.1 e MAX_NDVI_PLATEAU
+        entry.projection = Math.max(0.1, Math.min(MAX_NDVI_PLATEAU, entry.projection))
+      } else {
+        // REPRODUTIVO (platô): Histórico é o melhor preditor
+        // Nesta fase, a planta está estável e o histórico mostra o padrão típico
+        
+        const MAX_NDVI_PLATEAU = 0.92
+        
+        if (historicalAvg !== null) {
+          // Platô: usar histórico como base principal
+          // porque mostra quando começa a transição para senescência
+          entry.projection = historicalAvg
+        } else {
+          // Sem histórico: manter platô com pequeno declínio gradual
+          // (biologicamente, platô não dura para sempre)
+          const gradualDecline = 0.002 * daysFromLast // 0.2% por dia
+          entry.projection = Math.max(MIN_NDVI, lastCurrentValue - gradualDecline)
+        }
+        // Limitar entre MIN_NDVI e MAX_NDVI_PLATEAU
+        entry.projection = Math.max(MIN_NDVI, Math.min(MAX_NDVI_PLATEAU, entry.projection))
       }
+      
+      // Garantir limites físicos
+      entry.projection = Math.max(0.1, Math.min(1.0, entry.projection))
     }
   }
   

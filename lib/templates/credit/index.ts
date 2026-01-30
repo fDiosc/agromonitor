@@ -55,7 +55,7 @@ function buildUserPrompt(context: AnalysisContext): string {
 ### LOCALIZAÇÃO
 - Cidade/Estado: ${field.city}/${field.state}
 - Área: ${agroData.areaHa?.toFixed(1) || 'N/A'} ha
-- Cultura: ${field.crop}
+- Cultura: ${field.cropType}
 
 ### FENOLOGIA DETECTADA
 - Plantio Estimado: ${agroData.plantingDate || 'Não detectado'}

@@ -43,7 +43,7 @@ export async function POST(
       const merxReport = await getFullReport(
         field.geometryJson,
         field.seasonStartDate.toISOString().split('T')[0],
-        field.crop
+        field.cropType
       )
 
       // Calcular área local se Merx não retornou
@@ -55,11 +55,25 @@ export async function POST(
       }
 
       // Calcular fenologia
+      // Se o produtor informou a data de plantio, passar para o serviço
+      const plantingDateInput = field.plantingDateInput 
+        ? field.plantingDateInput.toISOString().split('T')[0] 
+        : null
+      
       const phenology = calculatePhenology(
         merxReport.ndvi,
         merxReport.historical_ndvi,
-        { crop: field.crop, areaHa }
+        { 
+          crop: field.cropType, 
+          areaHa,
+          plantingDateInput 
+        }
       )
+      
+      // Log se plantio foi informado
+      if (plantingDateInput) {
+        console.log(`[PROCESS] Data de plantio informada pelo produtor: ${plantingDateInput}`)
+      }
 
       // Calcular correlação histórica robusta
       const correlation = calculateHistoricalCorrelation(
@@ -88,7 +102,7 @@ export async function POST(
       const complementary = await getComplementaryData(
         field.geometryJson,
         phenology.plantingDate || field.seasonStartDate.toISOString().split('T')[0],
-        field.crop
+        field.cropType
       )
 
       // Salvar ou atualizar AgroData

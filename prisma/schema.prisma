@@ -7,15 +7,117 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ==================== MULTI-TENANCY ====================
+
+model Workspace {
+  id       String  @id @default(cuid())
+  name     String // Nome da empresa
+  slug     String  @unique // URL amigável (ex: "merx", "trading-abc")
+  logo     String? // URL do logo
+  isActive Boolean @default(true)
+
+  // Configurações do workspace (JSON)
+  settings String?
+
+  // Limites e quotas
+  maxFields Int @default(100)
+  maxUsers  Int @default(10)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relações
+  users     User[]
+  fields    Field[]
+  producers Producer[]
+
+  @@index([slug])
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+
+  // Status e controle
+  isActive           Boolean  @default(true)
+  role               UserRole @default(VIEWER)
+  mustChangePassword Boolean  @default(true) // Força troca no primeiro login
+
+  // Disclaimer de termos (Alpha/Beta)
+  hasAcceptedDisclaimer  Boolean   @default(false)
+  disclaimerAcceptedAt   DateTime?
+  disclaimerVersionAccepted String?  // Versão aceita (ex: "0.0.7")
+
+  // Workspace
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  // Sessões
+  lastLoginAt DateTime?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Audit trail
+  createdFields Field[] @relation("CreatedBy")
+
+  @@index([workspaceId])
+  @@index([email])
+}
+
+enum UserRole {
+  SUPER_ADMIN // Pode gerenciar workspaces
+  ADMIN       // Pode gerenciar usuários do workspace
+  OPERATOR    // Pode criar/editar talhões
+  VIEWER      // Apenas visualização
+}
+
+// ==================== PRODUTORES ====================
+
+model Producer {
+  id   String  @id @default(cuid())
+  name String
+  cpf  String? // Opcional
+
+  // Multi-tenancy
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relações
+  fields Field[]
+
+  @@index([workspaceId])
+  @@index([workspaceId, name])
+}
+
+// ==================== TIPOS DE CULTURA ====================
+
+enum CropType {
+  SOJA
+  MILHO
+}
+
 // ==================== TALHÕES ====================
 
 model Field {
-  id              String    @id @default(cuid())
+  id              String   @id @default(cuid())
   name            String
-  crop            String    @default("SOJA")
+  cropType        CropType @default(SOJA) // Tipo de cultura
   seasonStartDate DateTime
-  status          String    @default("PENDING") // PENDING, PROCESSING, SUCCESS, ERROR
+  status          String   @default("PENDING") // PENDING, PROCESSING, SUCCESS, PARTIAL, ERROR
   errorMessage    String?
+
+  // Data de plantio informada pelo produtor (opcional)
+  // Se informada, é usada como base 100% confiável para cálculos
+  plantingDateInput DateTime?
 
   // Localização
   city      String?
@@ -32,10 +134,26 @@ model Field {
   updatedAt   DateTime  @updatedAt
   processedAt DateTime?
 
+  // Produtor vinculado (opcional)
+  producerId String?
+  producer   Producer? @relation(fields: [producerId], references: [id])
+
+  // Multi-tenancy (opcional para migração de dados existentes)
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
+
+  // Audit
+  createdById String?
+  createdBy   User?   @relation("CreatedBy", fields: [createdById], references: [id])
+
   // Relações
   agroData AgroData?
   analyses Analysis[]
   ndviData NdviDataPoint[]
+
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+  @@index([producerId])
 }
 
 // ==================== DADOS AGRONÔMICOS (BASE) ====================

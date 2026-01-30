@@ -7,13 +7,14 @@
 3. [Detecção Fenológica](#3-detecção-fenológica)
 4. [Interpolação e Suavização](#4-interpolação-e-suavização)
 5. [Correlação Histórica](#5-correlação-histórica)
-6. [Níveis de Confiança](#6-níveis-de-confiança)
-7. [Estimativa de Produtividade](#7-estimativa-de-produtividade)
-8. [Análises por Template](#8-análises-por-template)
-   - [Análise de Crédito](#81-análise-de-crédito)
-   - [Análise Logística](#82-análise-logística)
-   - [Matriz de Risco](#83-matriz-de-risco)
-9. [Limitações e Considerações](#9-limitações-e-considerações)
+6. [Projeção Adaptativa](#6-projeção-adaptativa-por-fase-fenológica)
+7. [Níveis de Confiança](#7-níveis-de-confiança)
+8. [Estimativa de Produtividade](#8-estimativa-de-produtividade)
+9. [Análises por Template](#9-análises-por-template)
+   - [Análise de Crédito](#91-análise-de-crédito)
+   - [Análise Logística](#92-análise-logística)
+   - [Matriz de Risco](#93-matriz-de-risco)
+10. [Limitações e Considerações](#10-limitações-e-considerações)
 
 ---
 
@@ -281,7 +282,162 @@ compositeScore = pearsonScore * 0.4 + rmseScore * 0.3 + adherenceScore * 0.3
 
 ---
 
-## 6. Níveis de Confiança
+## 6. Projeção Adaptativa por Fase Fenológica
+
+### 6.1 Problema da Projeção Tradicional
+
+A abordagem tradicional de usar **apenas a média histórica** para projeção apresenta limitações:
+
+1. **Ignora tendência atual**: Dados recentes mostram direção do NDVI (subindo/caindo)
+2. **Variabilidade entre safras**: Cada safra tem timing diferente
+3. **Violação biológica**: Projeção pode "subir" quando planta está em senescência
+
+### 6.2 Modelo Adaptativo
+
+O sistema detecta a **fase fenológica atual** e aplica lógica diferenciada:
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         MODELO ADAPTATIVO DE PROJEÇÃO                        │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  1. Detectar fase usando regressão linear dos últimos 14 dias               │
+│                                                                              │
+│  2. Calcular tendência (slope) e qualidade do ajuste (R²)                   │
+│                                                                              │
+│  3. Aplicar lógica por fase:                                                 │
+│                                                                              │
+│     VEGETATIVO (slope > 0.5%/dia):                                           │
+│       SE NDVI > 0.80 (próximo platô):                                        │
+│         → min(tendência, histórico) - histórico mostra quando cai           │
+│       SENÃO:                                                                 │
+│         → 60% tendência + 40% histórico                                      │
+│       Limite máximo: NDVI = 0.92                                             │
+│                                                                              │
+│     REPRODUTIVO (|slope| < 0.5%/dia):                                        │
+│       → Usar histórico diretamente                                           │
+│       Racional: padrão típico de platô → senescência                        │
+│                                                                              │
+│     SENESCÊNCIA (slope < -0.5%/dia, R² > 70%):                               │
+│       → Decaimento exponencial: NDVI(t) = MIN + (N₀-MIN) × e^(-k×t)         │
+│       Limite mínimo: NDVI = 0.18                                             │
+│       Racional: curva suave até colheita                                     │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.3 Detecção de Fase Fenológica
+
+```javascript
+function detectPhenologicalPhase(data, windowDays = 14) {
+  // Regressão linear nos últimos N dias
+  const regression = linearRegression(lastNDays)
+  
+  const SLOPE_THRESHOLD = 0.005  // 0.5% por dia
+  
+  if (regression.slope > SLOPE_THRESHOLD && regression.rSquared > 0.5) {
+    return 'vegetative'   // NDVI subindo
+  } else if (regression.slope < -SLOPE_THRESHOLD && regression.rSquared > 0.5) {
+    return 'senescence'   // NDVI caindo
+  } else {
+    return 'reproductive' // NDVI estável (platô)
+  }
+}
+```
+
+### 6.4 Fundamento Estatístico
+
+A detecção de tendência usa **regressão linear simples (OLS)**:
+
+```
+y = a + bx
+
+onde:
+- y = NDVI
+- x = dias
+- b = slope (taxa de mudança)
+- a = intercept
+```
+
+**Métricas de validação:**
+
+| Métrica | Descrição | Uso |
+|---------|-----------|-----|
+| R² | Coeficiente de determinação | Qualidade do ajuste (0-1) |
+| p-value | Significância do slope | Se < 0.05, tendência é real |
+| Slope | Taxa de mudança diária | Direção e velocidade |
+
+### 6.5 Fundamento Biológico
+
+O modelo respeita princípios agronômicos fundamentais:
+
+| Fase | Comportamento Biológico | Regra de Projeção |
+|------|------------------------|-------------------|
+| **Vegetativo** | Planta crescendo, acumulando biomassa | Tendência limitada pelo platô (~0.92) |
+| **Vegetativo (platô)** | Próximo ao máximo (NDVI > 0.80) | min(tendência, histórico) |
+| **Reprodutivo** | Floração/enchimento, NDVI estável | Histórico é melhor preditor |
+| **Senescência** | Maturação, perda de clorofila | Decaimento exponencial |
+
+> **Princípios Fundamentais**:
+> 1. Uma planta não pode crescer indefinidamente (limite ~0.92)
+> 2. Uma planta em senescência não pode reverter o processo
+> 3. O histórico mostra o padrão típico de transição entre fases
+
+### 6.6 Exemplos Práticos
+
+#### Caso 1: Senescência (NDVI caindo)
+
+Talhão com NDVI caindo de 0.85 para 0.62 em 14 dias
+
+**Modelo Antigo:** Projeção subia para 0.88 (errado)
+
+**Modelo Adaptativo:** Projeção segue a queda (0.53, 0.41, 0.28)
+
+O modelo detecta **senescência** (slope = -1.75%/dia, R² = 93%) e usa decaimento exponencial.
+
+#### Caso 2: Próximo ao Platô (NDVI alto e subindo)
+
+Talhão com NDVI = 0.90, slope = +1%/dia
+
+**Modelo Antigo:** Projeção continua subindo indefinidamente (biologicamente impossível)
+
+**Modelo Adaptativo:**
+```
++7 dias: 0.886  (segue histórico, não tendência)
++30 dias: 0.736  (histórico mostra início da senescência)
++60 dias: 0.580  (histórico mostra senescência)
+```
+
+Quando NDVI > 0.80, o modelo dá prioridade ao histórico porque:
+- A planta está próxima do platô máximo (~0.92)
+- O histórico mostra quando começa a transição para senescência
+- Continuar subindo indefinidamente viola limites biológicos
+
+### 6.7 EOS Dinâmico (Previsão de Colheita)
+
+Quando senescência é detectada com alta confiança, a data de EOS é calculada dinamicamente:
+
+```javascript
+// Critérios para EOS dinâmico:
+if (slope < -0.01 && rSquared > 0.7 && ndvi_atual < ndvi_pico * 0.85) {
+  // Calcular quando projeção cruza threshold de colheita
+  // Fórmula: t = -ln((threshold - MIN) / (NDVI_0 - MIN)) / k
+  eosDate = calculateDynamicEos(...)
+}
+```
+
+**Exemplo real:**
+
+| Método | Data EOS | Diferença |
+|--------|----------|-----------|
+| Fixo (plantio + 120d) | 22/02/2026 | - |
+| **Dinâmico (tendência)** | **05/02/2026** | **17 dias antes** |
+
+O EOS dinâmico é mais preciso porque usa dados reais de senescência observada, não assunções genéricas sobre ciclo típico.
+
+---
+
+## 7. Níveis de Confiança
 
 ### 6.1 Score de Confiança (0-100)
 
@@ -330,7 +486,7 @@ function assessPhenologyHealth(maxNdvi, correlation, method, diagnostics) {
 
 ---
 
-## 7. Estimativa de Produtividade
+## 8. Estimativa de Produtividade
 
 ### 7.1 Modelo de Estimativa
 
@@ -368,9 +524,9 @@ function estimateYield(maxNdvi, areaHa, crop) {
 
 ---
 
-## 8. Análises por Template
+## 9. Análises por Template
 
-### 8.1 Análise de Crédito
+### 9.1 Análise de Crédito
 
 **Objetivo**: Avaliar risco de garantias agrícolas (CPRs, penhor rural).
 
@@ -405,7 +561,7 @@ interface CreditAnalysisResult {
 
 ---
 
-### 8.2 Análise Logística
+### 9.2 Análise Logística
 
 **Objetivo**: Planejar recepção e transporte de grãos.
 
@@ -454,7 +610,7 @@ interface LogisticsAnalysisResult {
 
 ---
 
-### 8.3 Matriz de Risco
+### 9.3 Matriz de Risco
 
 **Objetivo**: Visão consolidada 360° de todos os riscos.
 
@@ -511,23 +667,23 @@ interface RiskMatrixResult {
 
 ---
 
-## 9. Limitações e Considerações
+## 10. Limitações e Considerações
 
-### 9.1 Limitações do Sensoriamento Remoto
+### 10.1 Limitações do Sensoriamento Remoto
 
 1. **Cobertura de nuvens**: Imagens com >50% nuvens são descartadas, gerando gaps
 2. **Resolução temporal**: Revisita do satélite a cada 5-10 dias
 3. **Resolução espacial**: Pixels de 10-30m podem não capturar variabilidade interna
 4. **Mistura de pixels**: Bordas do talhão podem ter contaminação de áreas vizinhas
 
-### 9.2 Limitações do Modelo
+### 10.2 Limitações do Modelo
 
 1. **Detecção de SOS/EOS**: Depende de thresholds fixos que podem não se aplicar a todas as regiões
 2. **Produtividade**: Modelo simplificado baseado apenas em NDVI; não considera pragas, doenças, fertilidade
 3. **Histórico**: Requer mínimo de 3 safras para correlação confiável
 4. **Segunda safra**: Modelo otimizado para safra principal; safrinha pode ter comportamento diferente
 
-### 9.3 Recomendações de Uso
+### 10.3 Recomendações de Uso
 
 | Situação | Recomendação |
 |----------|--------------|
@@ -536,7 +692,7 @@ interface RiskMatrixResult {
 | Sem SOS detectado | Verificar data de início de safra |
 | NDVI máx < 0.5 | Possível problema grave; verificar in loco |
 
-### 9.4 Atualização dos Dados
+### 10.4 Atualização dos Dados
 
 - **Frequência**: Dados atualizados a cada passagem do satélite (5-10 dias)
 - **Latência**: Processamento das imagens pode levar 1-3 dias
@@ -552,6 +708,7 @@ interface RiskMatrixResult {
 | 1.1.0 | 2025-01 | Adicionado serviço de correlação robusta com Pearson |
 | 1.2.0 | 2026-01 | Alinhamento fenológico por SOS |
 | 1.3.0 | 2026-01 | Adicionado estado PARTIAL para dados incompletos |
+| 1.4.0 | 2026-01 | **Modelo de Projeção Adaptativa**: Detecção automática de fase fenológica (vegetativo/reprodutivo/senescência) com lógica de projeção diferenciada. Em senescência, usa min(Tendência, Histórico) para respeitar limites biológicos. |
 
 ---
 

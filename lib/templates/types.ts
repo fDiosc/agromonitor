@@ -24,7 +24,7 @@ export interface FieldContext {
   name: string
   city: string
   state: string
-  crop: string
+  cropType: string
   areaHa: number
   seasonStartDate: string
 }

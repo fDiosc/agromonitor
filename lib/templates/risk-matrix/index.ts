@@ -77,7 +77,7 @@ function buildUserPrompt(context: AnalysisContext): string {
 ### LOCALIZAÇÃO
 - Cidade/Estado: ${field.city}/${field.state}
 - Área: ${agroData.areaHa?.toFixed(1) || 'N/A'} ha
-- Cultura: ${field.crop}
+- Cultura: ${field.cropType}
 
 ### FENOLOGIA
 - Plantio: ${agroData.plantingDate || 'Não detectado'}
@@ -203,12 +203,12 @@ function getFallbackResult(context: AnalysisContext): RiskMatrixAnalysisResult {
   const risks: string[] = []
   const recommendations: string[] = []
 
-  if (climaticRisk === 'ALTO' || climaticRisk === 'CRITICO') {
+  if (climaticRisk === 'ALTO' || climaticRisk === 'CRITICO' as string) {
     risks.push('Risco climático elevado - colheita em período chuvoso')
     recommendations.push('Preparar contingência para secagem e armazenagem')
   }
 
-  if (phenologicalRisk === 'ALTO' || phenologicalRisk === 'CRITICO') {
+  if (phenologicalRisk === 'ALTO' || phenologicalRisk === 'CRITICO' as string) {
     risks.push('Desenvolvimento fenológico abaixo do esperado')
     recommendations.push('Intensificar monitoramento semanal')
   }

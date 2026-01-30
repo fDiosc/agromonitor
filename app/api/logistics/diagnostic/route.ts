@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getSession, unauthorizedResponse } from '@/lib/auth'
 import { differenceInDays, addDays, format, parseISO } from 'date-fns'
 
 interface FieldWithData {
@@ -11,6 +12,11 @@ interface FieldWithData {
   latitude: number | null
   longitude: number | null
   status: string
+  producerId: string | null
+  producer: {
+    id: string
+    name: string
+  } | null
   agroData: {
     volumeEstimatedKg: number | null
     plantingDate: Date | null
@@ -40,6 +46,8 @@ interface ProcessedField {
   latitude: number
   longitude: number
   daysToHarvest: number
+  producerId?: string
+  producerName?: string
 }
 
 interface DailyForecast {
@@ -155,18 +163,31 @@ function aggregateClimateRisk(fields: ProcessedField[]): RiskLevel {
 
 export async function GET(request: NextRequest) {
   try {
+    const session = await getSession()
+    if (!session) {
+      return unauthorizedResponse()
+    }
+
     const searchParams = request.nextUrl.searchParams
     const seasonYear = searchParams.get('seasonYear')
     
     // Fetch all fields with processed data (only SUCCESS, not PARTIAL or ERROR)
+    // Filtered by workspace
     const fieldsRaw = await prisma.field.findMany({
       where: {
+        workspaceId: session.workspaceId,
         status: 'SUCCESS',
         agroData: {
           isNot: null
         }
       },
       include: {
+        producer: {
+          select: {
+            id: true,
+            name: true
+          }
+        },
         agroData: {
           select: {
             volumeEstimatedKg: true,
@@ -213,7 +234,9 @@ export async function GET(request: NextRequest) {
           riskLevel: getRiskLevel(f),
           latitude: f.latitude ?? 0,
           longitude: f.longitude ?? 0,
-          daysToHarvest: differenceInDays(harvestStart, today)
+          daysToHarvest: differenceInDays(harvestStart, today),
+          producerId: f.producerId ?? undefined,
+          producerName: f.producer?.name ?? undefined
         }
       })
       .sort((a, b) => a.daysToHarvest - b.daysToHarvest)

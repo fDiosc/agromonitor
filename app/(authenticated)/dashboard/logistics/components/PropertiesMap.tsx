@@ -66,8 +66,7 @@ function MapContent({ fields }: { fields: Field[] }) {
   
   useEffect(() => {
     setIsClient(true)
-    // Import Leaflet CSS
-    import('leaflet/dist/leaflet.css')
+    // Leaflet CSS is already imported in layout.tsx via CDN
   }, [])
 
   if (!isClient) {

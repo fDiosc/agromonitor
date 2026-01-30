@@ -2,23 +2,32 @@ import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { validateGeometry } from '@/lib/services/geometry.service'
 import { reverseGeocode } from '@/lib/services/geocoding.service'
+import { getSession, unauthorizedResponse } from '@/lib/auth'
 import { z } from 'zod'
 
 // Schema de validação
 const createFieldSchema = z.object({
   name: z.string().min(1, 'Nome é obrigatório').max(100),
-  crop: z.string().default('SOJA'),
+  cropType: z.enum(['SOJA', 'MILHO']).default('SOJA'),
   seasonStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida'),
-  geometryJson: z.string().min(1, 'Geometria é obrigatória')
+  geometryJson: z.string().min(1, 'Geometria é obrigatória'),
+  producerId: z.string().nullable().optional(),
+  plantingDateInput: z.string().nullable().optional(), // Data de plantio informada pelo produtor
 })
 
 /**
  * GET /api/fields
- * Lista todos os talhões
+ * Lista todos os talhões do workspace
  */
 export async function GET() {
   try {
+    const session = await getSession()
+    if (!session) {
+      return unauthorizedResponse()
+    }
+
     const fields = await prisma.field.findMany({
+      where: { workspaceId: session.workspaceId },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -28,7 +37,14 @@ export async function GET() {
         city: true,
         state: true,
         areaHa: true,
-        crop: true,
+        cropType: true,
+        plantingDateInput: true,
+        producer: {
+          select: {
+            id: true,
+            name: true,
+          }
+        },
         createdAt: true,
         updatedAt: true,
         processedAt: true,
@@ -67,6 +83,19 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   try {
+    const session = await getSession()
+    if (!session) {
+      return unauthorizedResponse()
+    }
+
+    // Verificar permissão (VIEWER não pode criar)
+    if (session.role === 'VIEWER') {
+      return NextResponse.json(
+        { error: 'Sem permissão para criar talhões' },
+        { status: 403 }
+      )
+    }
+
     // Verificar se há body
     const contentLength = request.headers.get('content-length')
     if (!contentLength || contentLength === '0') {
@@ -78,7 +107,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Parse JSON com tratamento de erro
-    let body: any
+    let body: unknown
     try {
       const text = await request.text()
       if (!text || text.trim() === '') {
@@ -97,12 +126,15 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const bodyData = body as Record<string, unknown>
     console.log('Received field data:', { 
-      name: body.name, 
-      crop: body.crop,
-      date: body.seasonStartDate,
-      hasGeometry: !!body.geometryJson,
-      geometryLength: body.geometryJson?.length
+      name: bodyData.name, 
+      cropType: bodyData.cropType,
+      date: bodyData.seasonStartDate,
+      producerId: bodyData.producerId,
+      plantingDateInput: bodyData.plantingDateInput,
+      hasGeometry: !!bodyData.geometryJson,
+      geometryLength: typeof bodyData.geometryJson === 'string' ? bodyData.geometryJson.length : 0
     })
     
     // Validar input
@@ -115,7 +147,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { name, crop, seasonStartDate, geometryJson } = parsed.data
+    const { name, cropType, seasonStartDate, geometryJson, producerId, plantingDateInput } = parsed.data
 
     // Validar geometria
     const validation = validateGeometry(geometryJson, 'geometry.geojson')
@@ -126,17 +158,33 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Verificar se produtor existe e pertence ao workspace (se informado)
+    if (producerId) {
+      const producer = await prisma.producer.findFirst({
+        where: {
+          id: producerId,
+          workspaceId: session.workspaceId,
+        },
+      })
+      if (!producer) {
+        return NextResponse.json(
+          { error: 'Produtor não encontrado' },
+          { status: 400 }
+        )
+      }
+    }
+
     // Geocodificar localização
     const location = await reverseGeocode(
       validation.centroid.lat,
       validation.centroid.lng
     )
 
-    // Criar talhão
+    // Criar talhão com workspaceId
     const field = await prisma.field.create({
       data: {
         name,
-        crop,
+        cropType,
         seasonStartDate: new Date(seasonStartDate),
         geometryJson: JSON.stringify(validation.geojson),
         status: 'PENDING',
@@ -144,7 +192,11 @@ export async function POST(request: NextRequest) {
         state: location.state,
         latitude: location.lat,
         longitude: location.lng,
-        areaHa: validation.areaHa
+        areaHa: validation.areaHa,
+        workspaceId: session.workspaceId,
+        createdById: session.userId,
+        producerId: producerId || null,
+        plantingDateInput: plantingDateInput ? new Date(plantingDateInput) : null,
       }
     })
 

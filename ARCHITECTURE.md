@@ -14,24 +14,35 @@ O MERX AGRO Monitor segue uma arquitetura Full-Stack com Next.js, onde o fronten
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                         Next.js Frontend                              │   │
 │  │  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐        │   │
-│  │  │ Dashboard │  │  Reports  │  │ Logistics │  │  Fields   │        │   │
-│  │  │   Page    │  │   Page    │  │   Page    │  │  New Page │        │   │
+│  │  │   Login   │  │ Dashboard │  │ Logistics │  │   Admin   │        │   │
+│  │  │   Page    │  │   Page    │  │   Page    │  │   Pages   │        │   │
 │  │  └───────────┘  └───────────┘  └───────────┘  └───────────┘        │   │
 │  │         │              │              │              │               │   │
 │  │         └──────────────┴──────────────┴──────────────┘               │   │
 │  │                                 │                                     │   │
-│  │                    React Query / fetch()                              │   │
-│  └─────────────────────────────────┼─────────────────────────────────────┘   │
-└────────────────────────────────────┼─────────────────────────────────────────┘
-                                     │
-                                     ▼
+│  │                    ┌─────── Sidebar Layout ───────┐                  │   │
+│  │                    │  React Query / fetch()       │                  │   │
+│  └────────────────────┼──────────────────────────────┼──────────────────┘   │
+└───────────────────────┼──────────────────────────────┼──────────────────────┘
+                        │                              │
+                        ▼                              │
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                            MIDDLEWARE (middleware.ts)                          │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │  - Verifica token JWT (cookie)                                           │  │
+│  │  - Redireciona para /login se não autenticado                           │  │
+│  │  - Injeta headers: x-user-id, x-workspace-id, x-user-role               │  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
+└───────────────────────┬───────────────────────────────────────────────────────┘
+                        │
+                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           SERVIDOR (Next.js API Routes)                      │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                            Route Handlers                            │   │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────┐   │   │
-│  │  │ /api/fields │  │/api/fields/ │  │/api/logistics│  │/api/admin│   │   │
-│  │  │   GET/POST  │  │ [id]/process│  │ /diagnostic  │  │/fix-status│  │   │
+│  │  │  /api/auth  │  │ /api/fields │  │/api/logistics│  │/api/admin│   │   │
+│  │  │ login/logout│  │ (+ tenant)  │  │ (+ tenant)   │  │users/ws  │   │   │
 │  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └─────────┘   │   │
 │  │         │                │                │                        │   │
 │  └─────────┼────────────────┼────────────────┼────────────────────────┘   │
@@ -43,8 +54,8 @@ O MERX AGRO Monitor segue uma arquitetura Full-Stack com Next.js, onde o fronten
 │  │  │  service    │  │   service   │  │   service   │              │   │
 │  │  └─────────────┘  └─────────────┘  └─────────────┘              │   │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │   │
-│  │  │   cycle     │  │  geometry   │  │  geocoding  │              │   │
-│  │  │  analysis   │  │   service   │  │   service   │              │   │
+│  │  │   cycle     │  │  geometry   │  │    auth     │              │   │
+│  │  │  analysis   │  │   service   │  │   (JWT)     │              │   │
 │  │  └─────────────┘  └─────────────┘  └─────────────┘              │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -55,16 +66,85 @@ O MERX AGRO Monitor segue uma arquitetura Full-Stack com Next.js, onde o fronten
 │   (Neon Cloud)       │  │   (Satellite)    │  │   (Analysis)     │
 │                      │  │                  │  │                  │
 │  ┌────────────────┐  │  │  - NDVI          │  │  - Template      │
-│  │     Field      │  │  │  - Precipitação  │  │    prompts       │
+│  │   Workspace    │  │  │  - Precipitação  │  │    prompts       │
 │  ├────────────────┤  │  │  - Solo          │  │  - Risk          │
-│  │    AgroData    │  │  │  - Histórico     │  │    analysis      │
+│  │     User       │  │  │  - Histórico     │  │    analysis      │
 │  ├────────────────┤  │  │  - Área lavoura  │  │                  │
-│  │    Analysis    │  │  │                  │  │                  │
+│  │     Field      │  │  │                  │  │                  │
 │  ├────────────────┤  │  └──────────────────┘  └──────────────────┘
-│  │ NdviDataPoint  │  │
+│  │    AgroData    │  │
+│  ├────────────────┤  │
+│  │    Analysis    │  │
 │  └────────────────┘  │
 └──────────────────────┘
 ```
+
+---
+
+## Fluxo de Autenticação
+
+```
+┌─────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Usuário   │────▶│   POST /login   │────▶│  Valida email/  │
+│   acessa    │     │   (email/pwd)   │     │  senha no banco │
+└─────────────┘     └─────────────────┘     └────────┬────────┘
+                                                      │
+                                                      ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    mustChangePassword = true ?                   │
+│  ┌────────────┐                         ┌────────────────────┐  │
+│  │    SIM     │────────────────────────▶│ Redirect /change-  │  │
+│  │            │                         │     password       │  │
+│  └────────────┘                         └─────────┬──────────┘  │
+│  ┌────────────┐                                   │             │
+│  │    NÃO     │◀───── (após trocar) ──────────────┘             │
+│  │            │                                                 │
+│  └─────┬──────┘                                                 │
+└────────┼────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Cria JWT com   │────▶│ Set Cookie      │────▶│ Redirect para   │
+│ userId, wsId,   │     │ 'auth-token'    │     │ Dashboard       │
+│ role, exp       │     │ (HTTP-only)     │     │                 │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+```
+
+### Fluxo de Disclaimer (Alpha/Beta)
+
+No primeiro acesso após login, usuários que não aceitaram o disclaimer são apresentados com um modal obrigatório:
+
+```
+┌─────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Login     │────▶│ hasAccepted     │────▶│     false ?     │
+│   success   │     │ Disclaimer?     │     │                 │
+└─────────────┘     └─────────────────┘     └────────┬────────┘
+                                                      │
+                           ┌──────────────────────────┤
+                           │                          │
+                           ▼                          ▼
+                    ┌──────────────┐          ┌──────────────┐
+                    │     SIM      │          │     NÃO      │
+                    │ (já aceitou) │          │ Modal Termos │
+                    └──────┬───────┘          └──────┬───────┘
+                           │                          │
+                           │                   POST /api/auth/
+                           │                   accept-disclaimer
+                           │                          │
+                           ▼                          ▼
+                    ┌─────────────────────────────────────────┐
+                    │              Dashboard                   │
+                    └─────────────────────────────────────────┘
+```
+
+**Termos do Disclaimer (7 itens):**
+1. Produto em ALPHA - funcionalidades podem mudar
+2. Bugs e indisponibilidades podem ocorrer
+3. Dados devem ser verificados/crosscheck
+4. Bugs e melhorias devem ser reportados
+5. Pode haver indisponibilidade a qualquer tempo
+6. Dados podem ser perdidos
+7. Serviço pode ser descontinuado (10 dias para extração)
 
 ---
 
@@ -86,7 +166,10 @@ components/
 ├── fields/
 │   └── field-table.tsx      # Tabela de talhões
 ├── layout/
-│   └── header.tsx           # Header com navegação
+│   ├── app-layout.tsx       # Layout principal com sidebar
+│   ├── sidebar.tsx          # Navegação lateral
+│   ├── sidebar-footer.tsx   # Versão e changelog
+│   └── changelog-modal.tsx  # Modal de changelog
 ├── map/
 │   └── MapDrawer.tsx        # Desenho de polígonos
 └── ui/
@@ -102,13 +185,19 @@ components/
 
 **Responsabilidades:**
 - Validação de requests
-- Autenticação (futuro)
+- Autenticação e autorização
 - Orquestração de serviços
 - Formatação de responses
+- Isolamento de dados por workspace
 
 **Padrão de Rotas:**
 ```
 app/api/
+├── auth/
+│   ├── login/route.ts              # POST (autenticação)
+│   ├── logout/route.ts             # POST (encerrar sessão)
+│   ├── change-password/route.ts    # POST (trocar senha)
+│   └── me/route.ts                 # GET (dados do usuário)
 ├── fields/
 │   ├── route.ts                    # GET (list), POST (create)
 │   └── [id]/
@@ -118,6 +207,14 @@ app/api/
 ├── logistics/
 │   └── diagnostic/route.ts         # GET (aggregated data)
 └── admin/
+    ├── users/
+    │   ├── route.ts                # GET, POST (CRUD usuários)
+    │   └── [id]/
+    │       ├── route.ts            # GET, PUT, DELETE
+    │       └── reset-password/route.ts
+    ├── workspaces/
+    │   ├── route.ts                # GET, POST (SUPER_ADMIN)
+    │   └── [id]/route.ts           # GET, PUT, DELETE
     └── fix-status/route.ts         # GET, POST
 ```
 
@@ -134,8 +231,8 @@ app/api/
 | Serviço | Arquivo | Função |
 |---------|---------|--------|
 | Merx | `merx.service.ts` | Integração com API de satélite |
-| Phenology | `phenology.service.ts` | Detecção de fenologia |
-| Cycle Analysis | `cycle-analysis.service.ts` | Análise de ciclo e histórico |
+| Phenology | `phenology.service.ts` | Detecção de fenologia + EOS dinâmico |
+| Cycle Analysis | `cycle-analysis.service.ts` | Projeção adaptativa por fase fenológica |
 | Correlation | `correlation.service.ts` | Correlação histórica robusta |
 | Geometry | `geometry.service.ts` | Validação e cálculo de geometrias |
 | Geocoding | `geocoding.service.ts` | Geocodificação reversa |
@@ -148,17 +245,79 @@ app/api/
 **Modelos:**
 
 ```prisma
+// Multi-tenancy
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  logo        String?
+  isActive    Boolean  @default(true)
+  settings    String?
+  maxFields   Int      @default(100)
+  maxUsers    Int      @default(10)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
+  fields      Field[]
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  name               String
+  passwordHash       String
+  isActive           Boolean   @default(true)
+  role               UserRole  @default(VIEWER)
+  mustChangePassword Boolean   @default(true)
+  workspaceId        String
+  workspace          Workspace @relation(...)
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
+
+enum UserRole {
+  SUPER_ADMIN  // Gestão global da plataforma
+  ADMIN        // Gestão do workspace
+  OPERATOR     // Criar/editar talhões
+  VIEWER       // Apenas visualização
+}
+
+model Producer {
+  id          String    @id @default(cuid())
+  name        String    // Obrigatório
+  cpf         String?   // Opcional
+  workspaceId String
+  workspace   Workspace @relation(...)
+  fields      Field[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+enum CropType {
+  SOJA   // Ciclo 120 dias
+  MILHO  // Ciclo 140 dias
+}
+
+// Dados de negócio
 model Field {
-  id              String    @id
-  name            String
-  status          String    // PENDING | PROCESSING | SUCCESS | PARTIAL | ERROR
-  errorMessage    String?
-  geometryJson    String
-  areaHa          Float?
-  // ... location fields
-  agroData        AgroData?
-  analyses        Analysis[]
-  ndviData        NdviDataPoint[]
+  id                String    @id
+  name              String
+  cropType          CropType  @default(SOJA)  // Tipo de cultura
+  plantingDateInput DateTime? // Data de plantio informada pelo produtor
+  status            String    // PENDING | PROCESSING | SUCCESS | PARTIAL | ERROR
+  errorMessage      String?
+  geometryJson      String
+  areaHa            Float?
+  producerId        String?   // Produtor vinculado (opcional)
+  producer          Producer?
+  workspaceId       String?   // Multi-tenancy
+  workspace         Workspace?
+  createdById       String?
+  createdBy         User?
+  agroData          AgroData?
+  analyses          Analysis[]
+  ndviData          NdviDataPoint[]
 }
 
 model AgroData {
@@ -169,7 +328,6 @@ model AgroData {
   peakDate              DateTime?
   volumeEstimatedKg     Float?
   confidenceScore       Int?
-  // ... raw data fields
   field                 Field
 }
 
@@ -205,6 +363,26 @@ model Analysis {
 
 ### Fluxo de Diagnóstico Logístico
 
+O módulo de diagnóstico logístico é organizado em **3 abas**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Diagnóstico Logístico                     │
+├─────────────────┬─────────────────┬─────────────────────────┤
+│    Overview     │    Produtor     │  Unidade de Recebimento │
+│    (default)    │   (filtro)      │      (em breve)         │
+└────────┬────────┴────────┬────────┴─────────────────────────┘
+         │                 │
+         ▼                 ▼
+  ┌──────────────┐  ┌──────────────────────────────────────┐
+  │ Visão geral  │  │ Selecionar produtores (multi-select) │
+  │ consolidada  │  │ Recalcular métricas, timeline, curva │
+  │ (todos)      │  │ Filtrar mapa e tabela                │
+  └──────────────┘  └──────────────────────────────────────┘
+```
+
+**Fluxo de Dados:**
+
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │ Fetch Fields│────▶│   Filter    │────▶│  Calculate  │
@@ -216,7 +394,7 @@ model Analysis {
                     │         Response                     │
                     │  - summary (totals, dates)          │
                     │  - dailyForecast (bell curve)       │
-                    │  - fields (schedule)                │
+                    │  - fields (+ producerId/Name)       │
                     │  - alerts (critical indicators)     │
                     └─────────────────────────────────────┘
 ```
@@ -263,16 +441,38 @@ Uso: Geração de análises textuais baseadas em templates.
 
 ## Segurança
 
-### Atual (MVP)
+### Autenticação
+- JWT com `jose` para tokens de sessão
+- Cookies HTTP-only para armazenamento de tokens
+- Hash de senhas com `bcryptjs` (cost 12)
+- Middleware de proteção em todas as rotas
+- Fluxo de primeiro acesso com troca de senha obrigatória
+
+### Multi-tenancy
+- Isolamento completo de dados por `workspaceId`
+- Todas as queries filtram por workspace do usuário
+- Middleware injeta `x-workspace-id` nos headers
+- Validação redundante em cada endpoint
+
+### RBAC (Role-Based Access Control)
+```
+SUPER_ADMIN → Pode tudo (criar workspaces, ver todos os dados)
+    │
+    ▼
+  ADMIN → Gestão de usuários do próprio workspace
+    │
+    ▼
+ OPERATOR → Criar/editar/processar talhões
+    │
+    ▼
+  VIEWER → Apenas leitura
+```
+
+### Validação e Sanitização
 - Chaves de API em variáveis de ambiente
 - Validação de input com Zod
 - Sanitização de geometrias
-
-### Futuro
-- Autenticação com NextAuth.js
-- RBAC (Role-Based Access Control)
-- Rate limiting
-- Audit logs
+- Emails normalizados (lowercase)
 
 ---
 

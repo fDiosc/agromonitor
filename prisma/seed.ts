@@ -1,6 +1,25 @@
 import { PrismaClient } from '@prisma/client'
+import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
+
+// ==================== WORKSPACE E ADMIN INICIAL ====================
+
+const defaultWorkspace = {
+  id: 'default-workspace',
+  name: 'MERX Demo',
+  slug: 'merx-demo',
+  isActive: true,
+  maxFields: 100,
+  maxUsers: 10,
+}
+
+const defaultAdmin = {
+  name: 'Administrador',
+  email: 'admin@merx.tech',
+  password: 'Admin@123', // Será trocada no primeiro login
+  role: 'SUPER_ADMIN' as const,
+}
 
 const templates = [
   {
@@ -63,6 +82,45 @@ const templates = [
 async function main() {
   console.log('🌱 Seeding database...')
 
+  // 1. Criar workspace padrão
+  console.log('\n📁 Creating default workspace...')
+  const workspace = await prisma.workspace.upsert({
+    where: { id: defaultWorkspace.id },
+    update: {
+      name: defaultWorkspace.name,
+      slug: defaultWorkspace.slug,
+    },
+    create: defaultWorkspace,
+  })
+  console.log(`✅ Workspace "${workspace.name}" created/updated`)
+
+  // 2. Criar usuário admin
+  console.log('\n👤 Creating admin user...')
+  const existingAdmin = await prisma.user.findUnique({
+    where: { email: defaultAdmin.email },
+  })
+
+  if (!existingAdmin) {
+    const passwordHash = await bcrypt.hash(defaultAdmin.password, 12)
+    const admin = await prisma.user.create({
+      data: {
+        name: defaultAdmin.name,
+        email: defaultAdmin.email,
+        passwordHash,
+        role: defaultAdmin.role,
+        workspaceId: workspace.id,
+        mustChangePassword: true,
+        isActive: true,
+      },
+    })
+    console.log(`✅ Admin user created: ${admin.email}`)
+    console.log(`   Password: ${defaultAdmin.password} (change on first login)`)
+  } else {
+    console.log(`⏭️  Admin user already exists: ${existingAdmin.email}`)
+  }
+
+  // 3. Criar templates de análise
+  console.log('\n📊 Creating analysis templates...')
   for (const template of templates) {
     await prisma.analysisTemplate.upsert({
       where: { id: template.id },
@@ -72,7 +130,27 @@ async function main() {
     console.log(`✅ Template "${template.name}" created/updated`)
   }
 
-  console.log('🎉 Seed completed!')
+  // 4. Migrar fields existentes para o workspace (se houver)
+  console.log('\n🔄 Migrating existing fields to default workspace...')
+  const orphanFields = await prisma.field.findMany({
+    where: { workspaceId: null as unknown as string },
+  })
+  
+  if (orphanFields.length > 0) {
+    await prisma.field.updateMany({
+      where: { workspaceId: null as unknown as string },
+      data: { workspaceId: workspace.id },
+    })
+    console.log(`✅ Migrated ${orphanFields.length} fields to default workspace`)
+  } else {
+    console.log('⏭️  No orphan fields to migrate')
+  }
+
+  console.log('\n🎉 Seed completed!')
+  console.log('\n📋 Login credentials:')
+  console.log(`   Email: ${defaultAdmin.email}`)
+  console.log(`   Password: ${defaultAdmin.password}`)
+  console.log('   (You will be asked to change password on first login)')
 }
 
 main()

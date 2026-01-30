@@ -4,11 +4,15 @@ Sistema de monitoramento agronômico para análise de risco logístico e previs�
 
 ## Visão Geral
 
-O **MERX AGRO Monitor** é uma plataforma que transforma dados de satélite e clima em insights acionáveis para planejamento logístico e análise de risco agrícola.
+O **MERX AGRO Monitor** é uma plataforma multi-tenant que transforma dados de satélite e clima em insights acionáveis para planejamento logístico e análise de risco agrícola.
 
 ### Principais Funcionalidades
 
+- **Multi-tenancy** - Isolamento completo de dados por empresa/workspace
+- **Autenticação** - Sistema de login com gestão de usuários e roles
+- **Cadastro de Produtores** - Gestão de produtores vinculados aos talhões
 - **Monitoramento de Talhões** - Cadastro e acompanhamento de áreas agrícolas
+- **Tipos de Cultura** - Suporte a Soja e Milho com ciclos diferenciados
 - **Detecção de Fenologia** - Identificação automática de plantio, emergência e colheita
 - **Curvas NDVI** - Visualização histórica e projeções com correlação
 - **Diagnóstico Logístico** - Visão consolidada para planejamento de recebimento
@@ -96,30 +100,42 @@ GEMINI_API_KEY="sua-chave-gemini"
 
 ```
 merx-agro-mvp/
-├── app/                        # Next.js App Router
-│   ├── api/                    # API Routes
-│   │   ├── fields/             # CRUD de talhões
-│   │   ├── logistics/          # Diagnóstico logístico
-│   │   ├── templates/          # Templates de análise
-│   │   └── admin/              # Endpoints administrativos
-│   ├── dashboard/              # Páginas do dashboard
-│   │   └── logistics/          # Módulo de diagnóstico logístico
-│   ├── fields/                 # Páginas de talhões
-│   └── reports/                # Relatórios detalhados
-├── components/                 # Componentes React
+├── app/
+│   ├── (authenticated)/        # Rotas protegidas (requer login)
+│   │   ├── layout.tsx          # Layout com Sidebar
+│   │   ├── page.tsx            # Dashboard principal
+│   │   ├── admin/
+│   │   │   ├── users/          # Gestão de usuários
+│   │   │   └── workspaces/     # Gestão de workspaces (SUPER_ADMIN)
+│   │   ├── producers/          # Gestão de produtores
+│   │   ├── dashboard/logistics/# Diagnóstico logístico
+│   │   ├── fields/new/         # Cadastro de talhões
+│   │   └── reports/[id]/       # Relatórios detalhados
+│   ├── login/                  # Página de login
+│   ├── change-password/        # Troca de senha (primeiro acesso)
+│   └── api/
+│       ├── auth/               # Autenticação (login, logout, etc)
+│       ├── admin/
+│       │   ├── users/          # CRUD de usuários
+│       │   └── workspaces/     # CRUD de workspaces
+│       ├── producers/          # CRUD de produtores
+│       ├── fields/             # CRUD de talhões
+│       ├── logistics/          # Diagnóstico logístico
+│       └── templates/          # Templates de análise
+├── components/
+│   ├── layout/                 # Sidebar, AppLayout, Changelog
 │   ├── fields/                 # Componentes de talhões
-│   ├── layout/                 # Header, Footer, etc
 │   ├── map/                    # Componentes de mapa
 │   └── ui/                     # Shadcn/ui components
-├── lib/                        # Utilitários e serviços
-│   ├── services/               # Serviços de negócio
-│   │   ├── merx.service.ts     # Integração Merx API
-│   │   ├── phenology.service.ts# Cálculos fenológicos
-│   │   ├── cycle-analysis.service.ts # Análise de ciclo
-│   │   └── correlation.service.ts    # Correlação histórica
-│   └── utils/                  # Funções utilitárias
-├── prisma/                     # Schema e migrations
-└── docs/                       # Documentação adicional
+├── lib/
+│   ├── auth.ts                 # Utilitários de autenticação (JWT)
+│   ├── version.ts              # Versão e changelog
+│   ├── prisma.ts               # Cliente Prisma
+│   └── services/               # Serviços de negócio
+├── prisma/
+│   ├── schema.prisma           # Schema do banco
+│   └── seed.ts                 # Seed inicial
+└── middleware.ts               # Proteção de rotas
 ```
 
 ---
@@ -130,9 +146,10 @@ merx-agro-mvp/
 |-----------|-----------|--------|
 | [README.md](./README.md) | Este documento - visão geral | ✅ Atualizado |
 | [CHANGELOG.md](./CHANGELOG.md) | Histórico de mudanças | ✅ Atualizado |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Arquitetura detalhada | ✅ Atualizado |
 | [METHODOLOGY.md](./METHODOLOGY.md) | Metodologias técnicas | ✅ Atualizado |
 | [DIAGNOSTICOLOG.md](./DIAGNOSTICOLOG.md) | Especificação módulo logístico | ✅ Atualizado |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Arquitetura detalhada | ✅ Novo |
+| [REFATORACAO1.md](./REFATORACAO1.md) | Plano de multi-tenancy e auth | ✅ Concluído |
 
 ### Documentos Legados (raiz do projeto)
 
@@ -142,6 +159,73 @@ merx-agro-mvp/
 | [../melhorias.md](../melhorias.md) | Análise de melhorias | 📦 Legado |
 | [../IMPLEMENTACAO.md](../IMPLEMENTACAO.md) | Plano de implementação | 📦 Legado |
 | [../logic.md](../logic.md) | Melhorias de lógica | 📦 Legado |
+
+---
+
+## Multi-tenancy e Autenticação
+
+### Hierarquia de Permissões
+
+| Role | Pode fazer |
+|------|-----------|
+| `SUPER_ADMIN` | Criar/gerenciar workspaces, todos os usuários |
+| `ADMIN` | Gerenciar usuários do próprio workspace |
+| `OPERATOR` | Criar/editar talhões |
+| `VIEWER` | Apenas visualizar |
+
+### Fluxo de Primeiro Acesso
+
+1. **Admin cria usuário** no sistema com senha temporária
+2. **Comunica credenciais** manualmente (WhatsApp, email, etc)
+3. **Usuário faz login** em `/login`
+4. **Sistema detecta** `mustChangePassword = true`
+5. **Redireciona** para `/change-password`
+6. **Após trocar senha**, acessa o dashboard normalmente
+
+### Isolamento de Dados
+
+- Cada workspace é completamente isolado
+- Usuários só veem dados do próprio workspace
+- APIs filtram automaticamente por `workspaceId`
+- SUPER_ADMIN pode acessar workspaces específicos
+
+### Credenciais Iniciais (Dev/Demo)
+
+```
+Email: admin@merx.tech
+Senha: Admin@123
+```
+
+> A senha será solicitada para troca no primeiro login.
+
+---
+
+## Produtores e Culturas
+
+### Cadastro de Produtores
+
+Produtores podem ser cadastrados para vinculação aos talhões:
+
+| Campo | Obrigatório | Descrição |
+|-------|-------------|-----------|
+| Nome | ✅ Sim | Nome completo do produtor |
+| CPF | ❌ Não | CPF (formatado automaticamente) |
+
+### Tipos de Cultura
+
+| Cultura | Ciclo (dias) | Emergência (dias) | Produtividade Base (kg/ha) |
+|---------|--------------|-------------------|---------------------------|
+| **Soja** | 120 | 8 | 3.500 |
+| **Milho** | 140 | 7 | 9.000 |
+
+### Data de Plantio Informada
+
+Se o produtor informar a data de plantio no cadastro do talhão:
+
+- É usada como base **100% confiável** para cálculos
+- SOS (emergência) = plantio + dias de emergência da cultura
+- EOS (colheita) = plantio + ciclo da cultura
+- **+25 pontos** no score de confiança
 
 ---
 
@@ -195,24 +279,64 @@ Sistema extensível de análises:
 
 ## API Endpoints
 
-### Talhões
+### Autenticação
 
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
-| GET | `/api/fields` | Listar talhões |
+| POST | `/api/auth/login` | Login com email/senha |
+| POST | `/api/auth/logout` | Encerrar sessão |
+| POST | `/api/auth/change-password` | Trocar senha |
+| GET | `/api/auth/me` | Dados do usuário logado |
+
+### Talhões (requer autenticação)
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| GET | `/api/fields` | Listar talhões (do workspace) |
 | POST | `/api/fields` | Criar talhão |
 | GET | `/api/fields/[id]` | Detalhes do talhão |
 | DELETE | `/api/fields/[id]` | Excluir talhão |
 | POST | `/api/fields/[id]/process` | Processar talhão |
 | POST | `/api/fields/[id]/analyze/[templateId]` | Executar análise |
 
+### Produtores
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| GET | `/api/producers` | Listar produtores (do workspace) |
+| POST | `/api/producers` | Criar produtor |
+| GET | `/api/producers/[id]` | Detalhes do produtor |
+| PUT | `/api/producers/[id]` | Atualizar produtor |
+| DELETE | `/api/producers/[id]` | Excluir produtor |
+
 ### Diagnóstico Logístico
 
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
-| GET | `/api/logistics/diagnostic` | Dados agregados |
+| GET | `/api/logistics/diagnostic` | Dados agregados (do workspace) |
 
-### Admin
+### Admin - Usuários (ADMIN/SUPER_ADMIN)
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| GET | `/api/admin/users` | Listar usuários do workspace |
+| POST | `/api/admin/users` | Criar usuário |
+| GET | `/api/admin/users/[id]` | Detalhes do usuário |
+| PUT | `/api/admin/users/[id]` | Atualizar usuário |
+| DELETE | `/api/admin/users/[id]` | Excluir usuário |
+| POST | `/api/admin/users/[id]/reset-password` | Resetar senha |
+
+### Admin - Workspaces (SUPER_ADMIN)
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| GET | `/api/admin/workspaces` | Listar todos workspaces |
+| POST | `/api/admin/workspaces` | Criar workspace (com admin opcional) |
+| GET | `/api/admin/workspaces/[id]` | Detalhes do workspace |
+| PUT | `/api/admin/workspaces/[id]` | Atualizar workspace |
+| DELETE | `/api/admin/workspaces/[id]` | Excluir workspace |
+
+### Utilitários
 
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|

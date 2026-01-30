@@ -55,17 +55,17 @@ export async function GET(
     // Converter dados
     const currentNdviPoints: NdviPoint[] = field.ndviData.map(d => ({
       date: d.date.toISOString().split('T')[0],
-      ndvi_raw: d.ndviRaw,
-      ndvi_interp: d.ndviInterp,
-      ndvi_smooth: d.ndviSmooth
+      ndvi_raw: d.ndviRaw ?? undefined,
+      ndvi_interp: d.ndviInterp ?? undefined,
+      ndvi_smooth: d.ndviSmooth ?? undefined
     }))
 
     const historicalNdviPoints: NdviPoint[][] = historicalBySeasonArray.map(season =>
       season.map(d => ({
         date: d.date.toISOString().split('T')[0],
-        ndvi_raw: d.ndviRaw,
-        ndvi_interp: d.ndviInterp,
-        ndvi_smooth: d.ndviSmooth
+        ndvi_raw: d.ndviRaw ?? undefined,
+        ndvi_interp: d.ndviInterp ?? undefined,
+        ndvi_smooth: d.ndviSmooth ?? undefined
       }))
     )
 
@@ -74,7 +74,7 @@ export async function GET(
       currentNdviPoints,
       historicalNdviPoints,
       field.agroData?.sosDate?.toISOString().split('T')[0] || null,
-      field.crop || 'SOJA',
+      field.cropType || 'SOJA',
       field.agroData?.eosDate?.toISOString().split('T')[0] || null,
       field.agroData?.plantingDate?.toISOString().split('T')[0] || null
     )

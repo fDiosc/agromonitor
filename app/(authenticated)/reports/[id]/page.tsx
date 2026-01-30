@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { Header } from '@/components/layout/header'
 import { MetricCards } from '@/components/agro/metric-cards'
 import { PhenologyTimeline } from '@/components/agro/phenology-timeline'
 import { TemplateSelector } from '@/components/templates/template-selector'
@@ -149,23 +148,17 @@ export default function ReportPage() {
 
   if (loading) {
     return (
-      <>
-        <Header />
-        <main className="max-w-7xl mx-auto p-8 flex items-center justify-center min-h-[60vh]">
-          <Loader2 size={32} className="animate-spin text-slate-400" />
-        </main>
-      </>
+      <div className="p-8 flex items-center justify-center min-h-[60vh]">
+        <Loader2 size={32} className="animate-spin text-slate-400" />
+      </div>
     )
   }
 
   if (!field) {
     return (
-      <>
-        <Header />
-        <main className="max-w-7xl mx-auto p-8">
-          <p className="text-slate-500">Talhão não encontrado</p>
-        </main>
-      </>
+      <div className="p-8">
+        <p className="text-slate-500">Talhão não encontrado</p>
+      </div>
     )
   }
 
@@ -182,8 +175,8 @@ export default function ReportPage() {
     : prepareChartData(ndviData, historicalNdvi, agroData)
   
   // Calcular informações do ciclo para exibição
-  const hasHistoricalCycles = cycleAnalysis?.historicalCycles?.length > 0
-  const numHistoricalYears = cycleAnalysis?.historicalCycles?.length || 0
+  const hasHistoricalCycles = (cycleAnalysis?.historicalCycles?.length ?? 0) > 0
+  const numHistoricalYears = cycleAnalysis?.historicalCycles?.length ?? 0
 
   // Usar dados da janela de colheita da API ou calcular localmente
   const harvestWindow = harvestWindowData || (() => {
@@ -206,9 +199,7 @@ export default function ReportPage() {
   })()
 
   return (
-    <>
-      <Header />
-      <main className="max-w-7xl mx-auto p-8 space-y-8">
+    <div className="p-8 space-y-8">
         {/* Header */}
         <div className="flex items-center justify-between">
           <Link
@@ -470,8 +461,8 @@ export default function ReportPage() {
                 <div className="w-px h-4 bg-slate-200"></div>
                 
                 {/* Anos Históricos */}
-                {cycleAnalysis?.historicalCycles?.length > 0 ? (
-                  cycleAnalysis.historicalCycles.map((cycle: any, idx: number) => (
+                {(cycleAnalysis?.historicalCycles?.length ?? 0) > 0 ? (
+                  cycleAnalysis!.historicalCycles!.map((cycle: any, idx: number) => (
                     <div key={idx} className="flex items-center gap-2">
                       <div className={`w-8 border-t-2 border-dashed`} style={{
                         borderColor: idx === 0 ? '#525252' : idx === 1 ? '#737373' : '#a3a3a3'
@@ -524,8 +515,7 @@ export default function ReportPage() {
             templateColor={selectedTemplateConfig.color}
           />
         )}
-      </main>
-    </>
+    </div>
   )
 }
 

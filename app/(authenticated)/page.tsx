@@ -1,14 +1,16 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Header } from '@/components/layout/header'
 import { FieldTable } from '@/components/fields/field-table'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Plus } from 'lucide-react'
+import Link from 'next/link'
+import { Button } from '@/components/ui/button'
 
 interface Field {
   id: string
   name: string
   status: string
+  errorMessage?: string | null
   city: string | null
   state: string | null
   areaHa: number | null
@@ -116,27 +118,32 @@ export default function DashboardPage() {
   }
 
   return (
-    <>
-      <Header />
-      <main className="max-w-7xl mx-auto p-8">
-        <h2 className="text-3xl font-black mb-8 text-slate-900">
+    <div className="p-8">
+      <div className="flex items-center justify-between mb-8">
+        <h2 className="text-3xl font-black text-slate-900">
           Carteira de Monitoramento
         </h2>
+        <Link href="/fields/new">
+          <Button>
+            <Plus size={18} className="mr-2" />
+            Novo Talhão
+          </Button>
+        </Link>
+      </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 size={32} className="animate-spin text-slate-400" />
-          </div>
-        ) : (
-          <FieldTable
-            fields={fields}
-            onDelete={handleDelete}
-            onReprocess={handleReprocess}
-            isDeleting={deleting}
-            isReprocessing={reprocessing}
-          />
-        )}
-      </main>
-    </>
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 size={32} className="animate-spin text-slate-400" />
+        </div>
+      ) : (
+        <FieldTable
+          fields={fields}
+          onDelete={handleDelete}
+          onReprocess={handleReprocess}
+          isDeleting={deleting}
+          isReprocessing={reprocessing}
+        />
+      )}
+    </div>
   )
 }

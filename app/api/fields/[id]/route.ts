@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { analyzeCycles, prepareHistoricalOverlayData } from '@/lib/services/cycle-analysis.service'
 import { calculateHistoricalCorrelation, getCorrelationDiagnosis } from '@/lib/services/correlation.service'
+import { getSession, unauthorizedResponse } from '@/lib/auth'
 import type { NdviPoint } from '@/lib/services/merx.service'
 
 interface RouteParams {
@@ -17,8 +18,16 @@ export async function GET(
   { params }: RouteParams
 ) {
   try {
+    const session = await getSession()
+    if (!session) {
+      return unauthorizedResponse()
+    }
+
     const field = await prisma.field.findUnique({
-      where: { id: params.id },
+      where: { 
+        id: params.id,
+        workspaceId: session.workspaceId // Garantir isolamento
+      },
       include: {
         agroData: true,
         analyses: {
@@ -62,17 +71,17 @@ export async function GET(
     // Converter dados para formato esperado pelo cycle-analysis
     const currentNdviPoints: NdviPoint[] = field.ndviData.map(d => ({
       date: d.date.toISOString().split('T')[0],
-      ndvi_raw: d.ndviRaw,
-      ndvi_interp: d.ndviInterp,
-      ndvi_smooth: d.ndviSmooth
+      ndvi_raw: d.ndviRaw ?? undefined,
+      ndvi_interp: d.ndviInterp ?? undefined,
+      ndvi_smooth: d.ndviSmooth ?? undefined
     }))
 
     const historicalNdviPoints: NdviPoint[][] = historicalBySeasonArray.map(season =>
       season.map(d => ({
         date: d.date.toISOString().split('T')[0],
-        ndvi_raw: d.ndviRaw,
-        ndvi_interp: d.ndviInterp,
-        ndvi_smooth: d.ndviSmooth
+        ndvi_raw: d.ndviRaw ?? undefined,
+        ndvi_interp: d.ndviInterp ?? undefined,
+        ndvi_smooth: d.ndviSmooth ?? undefined
       }))
     )
 
@@ -82,7 +91,7 @@ export async function GET(
       cycleAnalysis = analyzeCycles(
         currentNdviPoints,
         historicalNdviPoints,
-        field.crop || 'SOJA'
+        field.cropType || 'SOJA'
       )
     }
 
@@ -119,7 +128,7 @@ export async function GET(
         currentNdviPoints,
         historicalNdviPoints,
         field.agroData?.sosDate?.toISOString().split('T')[0] || null,
-        field.crop || 'SOJA',
+        field.cropType || 'SOJA',
         field.agroData?.eosDate?.toISOString().split('T')[0] || null,
         field.agroData?.plantingDate?.toISOString().split('T')[0] || null,
         harvestEndDate
@@ -171,8 +180,25 @@ export async function DELETE(
   { params }: RouteParams
 ) {
   try {
+    const session = await getSession()
+    if (!session) {
+      return unauthorizedResponse()
+    }
+
+    // Verificar permissão (VIEWER não pode deletar)
+    if (session.role === 'VIEWER') {
+      return NextResponse.json(
+        { error: 'Sem permissão para deletar talhões' },
+        { status: 403 }
+      )
+    }
+
+    // Deletar apenas se pertencer ao workspace
     await prisma.field.delete({
-      where: { id: params.id }
+      where: { 
+        id: params.id,
+        workspaceId: session.workspaceId
+      }
     })
 
     return NextResponse.json({ success: true })
