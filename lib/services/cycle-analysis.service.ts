@@ -752,6 +752,72 @@ export function prepareHistoricalOverlayData(
     })
   })
   
+  // ==================== ESTENDER HISTÓRICOS ATÉ O EOS ====================
+  // Para cada safra histórica, projetar a curva até o EOS da safra atual
+  // Isso permite ao usuário ver como as safras anteriores se comportaram
+  // no período equivalente (próximo à colheita)
+  if (eosDate) {
+    const eosTime = new Date(eosDate).getTime()
+    const dayMs = 24 * 60 * 60 * 1000
+    const MIN_NDVI = 0.18
+    
+    keys.forEach(key => {
+      // Encontrar os últimos pontos com dados para este histórico
+      const pointsWithData: { idx: number, value: number, date: string }[] = []
+      chartData.forEach((entry, idx) => {
+        if (entry[key] !== undefined && entry[key] !== null) {
+          pointsWithData.push({ idx, value: entry[key], date: entry.date })
+        }
+      })
+      
+      if (pointsWithData.length < 5) return // Precisa de dados suficientes
+      
+      // Pegar os últimos 10 pontos para calcular a tendência
+      const lastPoints = pointsWithData.slice(-10)
+      const lastPoint = lastPoints[lastPoints.length - 1]
+      const lastPointDate = new Date(lastPoint.date).getTime()
+      
+      // Se o último ponto está antes do EOS, estender
+      if (lastPointDate < eosTime) {
+        // Calcular tendência (slope) dos últimos pontos
+        const n = lastPoints.length
+        let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0
+        lastPoints.forEach((p, i) => {
+          sumX += i
+          sumY += p.value
+          sumXY += i * p.value
+          sumX2 += i * i
+        })
+        const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
+        
+        // Se a tendência é de queda (slope negativo), projetar
+        // Se está subindo ou estável, não projetar (dados podem estar incompletos)
+        if (slope < -0.002) { // Queda de pelo menos 0.2% por intervalo
+          // Calcular taxa de decaimento exponencial baseada no slope
+          const decayRate = Math.abs(slope) / Math.max(0.3, lastPoint.value - MIN_NDVI)
+          
+          // Encontrar as datas após o último ponto histórico até o EOS
+          chartData.forEach((entry, idx) => {
+            if (idx > lastPoint.idx && entry[key] === undefined) {
+              const entryTime = new Date(entry.date).getTime()
+              
+              // Só projetar até 7 dias após o EOS
+              if (entryTime <= eosTime + 7 * dayMs) {
+                const daysFromLast = (entryTime - lastPointDate) / dayMs
+                
+                // Projeção exponencial suavizada
+                const projectedValue = MIN_NDVI + (lastPoint.value - MIN_NDVI) * Math.exp(-decayRate * daysFromLast)
+                
+                // Limitar ao MIN_NDVI
+                entry[key] = Math.max(MIN_NDVI, projectedValue)
+              }
+            }
+          })
+        }
+      }
+    })
+  }
+  
   // Estender dados até a colheita prevista (se disponível)
   if (eosDate && chartData.length > 0) {
     const eosTime = new Date(eosDate).getTime()

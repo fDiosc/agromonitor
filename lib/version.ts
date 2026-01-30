@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.0.8'
+export const APP_VERSION = '0.0.9'
 
 // Fases do produto
 export const VERSION_PHASES = {
@@ -23,6 +23,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   // ==================== ALPHA (0.0.x) ====================
+  {
+    version: '0.0.9',
+    date: '2026-01-30',
+    title: 'Extensão de Históricos e Deploy',
+    type: 'improvement',
+    changes: [
+      'Linhas históricas estendidas até a data de EOS',
+      'Visualização completa do declínio de safras anteriores',
+      'Deploy CapRover configurado e funcional',
+      'Endpoint /api/health para monitoramento',
+    ],
+  },
   {
     version: '0.0.8',
     date: '2026-01-30',

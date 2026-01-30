@@ -413,7 +413,32 @@ Quando NDVI > 0.80, o modelo dá prioridade ao histórico porque:
 - O histórico mostra quando começa a transição para senescência
 - Continuar subindo indefinidamente viola limites biológicos
 
-### 6.7 EOS Dinâmico (Previsão de Colheita)
+### 6.7 Extensão de Históricos até EOS
+
+Para permitir ao usuário visualizar como as safras anteriores se comportaram no período equivalente (próximo à colheita), as linhas históricas são estendidas até a data de EOS prevista da safra atual.
+
+**Metodologia:**
+
+1. **Detecção de tendência**: Calcula-se o slope dos últimos 10 pontos de cada safra histórica
+2. **Projeção exponencial**: Se a tendência é de queda (slope < -0.002), projeta-se usando decaimento exponencial
+3. **Limite físico**: A projeção converge para MIN_NDVI (0.18 - solo/palha residual)
+
+```javascript
+// Para cada safra histórica com tendência de queda
+if (slope < -0.002 && lastPointDate < eosTime) {
+  const decayRate = Math.abs(slope) / (lastValue - MIN_NDVI)
+  
+  // Projeção exponencial até EOS + 7 dias
+  projectedValue = MIN_NDVI + (lastValue - MIN_NDVI) * exp(-decayRate * days)
+}
+```
+
+**Benefícios:**
+- Usuário visualiza padrão completo de declínio das safras anteriores
+- Comparação direta entre projeção atual e comportamento histórico
+- Contexto para decisões de planejamento logístico
+
+### 6.8 EOS Dinâmico (Previsão de Colheita)
 
 Quando senescência é detectada com alta confiança, a data de EOS é calculada dinamicamente:
 

@@ -20,6 +20,27 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.9] - 2026-01-30
+
+### Adicionado
+
+#### Extensão de Históricos até EOS
+- Linhas históricas agora são projetadas até a data de EOS prevista
+- Permite ao usuário visualizar como safras anteriores se comportaram no período de colheita
+- Projeção usa modelo de decaimento exponencial baseado na tendência observada
+- Aplicado apenas quando há tendência de queda detectada (slope < -0.002)
+
+### Corrigido
+
+#### Deploy CapRover
+- Criada pasta `public/` (antes ausente)
+- Atualizado Dockerfile para Node 20 (compatibilidade com @google/genai)
+- Adicionado `DATABASE_URL` placeholder para build
+- Adicionado endpoint `/api/health` para health checks
+- Configurada porta 3000 corretamente no CapRover
+
+---
+
 ## [0.0.8] - 2026-01-30
 
 ### Adicionado
