@@ -154,13 +154,27 @@ export async function GET(
       }
     }
 
+    // Preparar informações ZARC para UI
+    let zarcInfo = null
+    if (field.agroData?.zarcWindowStart) {
+      zarcInfo = {
+        windowStart: field.agroData.zarcWindowStart,
+        windowEnd: field.agroData.zarcWindowEnd,
+        optimalStart: field.agroData.zarcOptimalStart,
+        optimalEnd: field.agroData.zarcOptimalEnd,
+        plantingRisk: field.agroData.zarcPlantingRisk,
+        plantingStatus: field.agroData.zarcPlantingStatus
+      }
+    }
+
     return NextResponse.json({
       field,
       historicalNdvi: historicalBySeasonArray,
       cycleAnalysis,
       correlationDetails,
       chartOverlayData,
-      harvestWindow: harvestWindowInfo
+      harvestWindow: harvestWindowInfo,
+      zarcInfo
     })
   } catch (error) {
     console.error('Error fetching field:', error)

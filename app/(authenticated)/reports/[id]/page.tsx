@@ -52,6 +52,7 @@ export default function ReportPage() {
   const [correlationDetails, setCorrelationDetails] = useState<any>(null)
   const [chartOverlayData, setChartOverlayData] = useState<any[]>([])
   const [harvestWindowData, setHarvestWindowData] = useState<any>(null)
+  const [zarcInfo, setZarcInfo] = useState<any>(null)
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null)
@@ -75,6 +76,7 @@ export default function ReportPage() {
       setCorrelationDetails(fieldData.correlationDetails || null)
       setChartOverlayData(fieldData.chartOverlayData || [])
       setHarvestWindowData(fieldData.harvestWindow || null)
+      setZarcInfo(fieldData.zarcInfo || null)
       setTemplates(templatesData.templates || [])
 
       // Select first analyzed template or first template
@@ -248,12 +250,13 @@ export default function ReportPage() {
           confidence={agroData?.confidence}
         />
 
-        {/* Phenology Timeline */}
+        {/* Phenology Timeline - com ZARC integrado */}
         <PhenologyTimeline
           plantingDate={agroData?.plantingDate}
           sosDate={agroData?.sosDate}
           eosDate={agroData?.eosDate}
           method={agroData?.phenologyMethod}
+          zarcInfo={zarcInfo}
         />
 
         {/* NDVI Chart */}
@@ -513,6 +516,8 @@ export default function ReportPage() {
             templateName={selectedTemplateConfig.name}
             templateIcon={selectedTemplateConfig.icon}
             templateColor={selectedTemplateConfig.color}
+            fieldId={fieldId}
+            onReprocessed={fetchData}
           />
         )}
     </div>

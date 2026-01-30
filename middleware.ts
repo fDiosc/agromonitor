@@ -19,6 +19,8 @@ const publicPrefixes = [
   '/_next',
   '/favicon',
   '/api/auth',
+  '/api/debug',
+  '/api/health',
 ]
 
 function isPublicRoute(pathname: string): boolean {

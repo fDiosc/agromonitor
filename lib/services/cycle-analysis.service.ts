@@ -562,6 +562,10 @@ export function prepareAlignedChartData(analysis: CycleAnalysisResult): any[] {
 /**
  * Prepara dados para gráfico com eixo de data (não alinhado por ciclo)
  * Inclui histórico estimado baseado no ciclo atual
+ * 
+ * Alinhamento histórico usa calendário agrícola simples:
+ * - Mesma data do ano anterior mapeada para o ano atual
+ * - Exemplo: 15/10/2024 → 15/10/2025
  */
 export function prepareHistoricalOverlayData(
   currentData: NdviPoint[],
@@ -653,76 +657,50 @@ export function prepareHistoricalOverlayData(
     }
   })
   
-  // Processar histórico
+  // ==================== ALINHAMENTO HISTÓRICO POR CALENDÁRIO ====================
+  // Método simples e robusto: mesma data do ano anterior → data equivalente no ano atual
+  // Exemplo: 15/10/2024 → 15/10/2025 (diferença de 1 ano exato)
   if (historicalData.length > 0) {
-    // Determinar SOS da safra atual
-    let currentSosTime: number | null = null
-    if (sosDate) {
-      currentSosTime = new Date(sosDate).getTime()
-    } else {
-      // Tentar detectar SOS dos dados atuais
-      const currentDetection = detectCycle(currentData, crop)
-      if (currentDetection.sosDate) {
-        currentSosTime = new Date(currentDetection.sosDate).getTime()
-      }
-    }
+    // Determinar o ano base da safra atual
+    // Para safra de verão: começa em set/out e vai até fev/mar do ano seguinte
+    const firstCurrentDate = new Date(sorted[0].date)
+    const currentSeasonYear = firstCurrentDate.getMonth() >= 7 
+      ? firstCurrentDate.getFullYear() 
+      : firstCurrentDate.getFullYear() - 1
     
     historicalData.forEach((hData, hIdx) => {
       if (hData.length === 0) return
       
-      // Filtrar dados válidos - usar fallback robusto
+      // Filtrar dados válidos
       const validHData = hData.filter(d => getNdvi(d) !== null)
       if (validHData.length < 5) return
       
-      // Detectar SOS do histórico
-      const hDetection = detectCycle(validHData, crop)
+      // Determinar o ano da safra histórica
+      const firstHDate = new Date(validHData[0].date)
+      const hSeasonYear = firstHDate.getMonth() >= 7 
+        ? firstHDate.getFullYear() 
+        : firstHDate.getFullYear() - 1
       
-      // Se não conseguir detectar SOS, usar o primeiro ponto acima de 0.3
-      let hSosTime: number | null = null
-      if (hDetection.sosDate) {
-        hSosTime = new Date(hDetection.sosDate).getTime()
-      } else {
-        // Fallback: encontrar primeiro ponto com NDVI > 0.3
-        const firstHigh = validHData.find(d => (getNdvi(d) || 0) > 0.3)
-        if (firstHigh) {
-          hSosTime = new Date(firstHigh.date).getTime()
-        }
-      }
+      // Calcular diferença em anos entre safras
+      const yearDiff = currentSeasonYear - hSeasonYear
       
-      if (!hSosTime || !currentSosTime) {
-        // Sem SOS detectável, alinhar pelo início dos dados
-        const currentStart = new Date(sorted[0].date).getTime()
-        const hStart = new Date(validHData[0].date).getTime()
+      // Mapear cada ponto histórico para o ano atual
+      // Simplesmente adiciona yearDiff anos à data original
+      validHData.forEach(hPoint => {
+        const hPointDate = new Date(hPoint.date)
         
-        validHData.forEach(hPoint => {
-          const hPointTime = new Date(hPoint.date).getTime()
-          const daysSinceStart = Math.round((hPointTime - hStart) / (1000 * 60 * 60 * 24))
-          const mappedTime = currentStart + daysSinceStart * 24 * 60 * 60 * 1000
-          const mappedDate = new Date(mappedTime).toISOString().split('T')[0]
-          
-          let entry = dateMap.get(mappedDate)
-          if (!entry) {
-            entry = { date: mappedDate }
-            dateMap.set(mappedDate, entry)
-          }
-          entry[`h${hIdx + 1}`] = getNdvi(hPoint)
-        })
-      } else {
-        // Alinhar pelo SOS
-        validHData.forEach(hPoint => {
-          const hPointTime = new Date(hPoint.date).getTime()
-          const daysSinceHSos = Math.round((hPointTime - hSosTime!) / (1000 * 60 * 60 * 24))
-          const mappedTime = currentSosTime! + daysSinceHSos * 24 * 60 * 60 * 1000
-          const mappedDate = new Date(mappedTime).toISOString().split('T')[0]
-          
-          let entry = dateMap.get(mappedDate)
-          if (!entry) {
-            entry = { date: mappedDate }
-            dateMap.set(mappedDate, entry)
-          }
-          entry[`h${hIdx + 1}`] = getNdvi(hPoint)
-        })
-      }
+        // Adicionar yearDiff anos à data histórica
+        const mappedDate = new Date(hPointDate)
+        mappedDate.setFullYear(mappedDate.getFullYear() + yearDiff)
+        const mappedDateStr = mappedDate.toISOString().split('T')[0]
+        
+        let entry = dateMap.get(mappedDateStr)
+        if (!entry) {
+          entry = { date: mappedDateStr }
+          dateMap.set(mappedDateStr, entry)
+        }
+        entry[`h${hIdx + 1}`] = getNdvi(hPoint)
+      })
     })
   }
   
@@ -751,72 +729,6 @@ export function prepareHistoricalOverlayData(
       }
     })
   })
-  
-  // ==================== ESTENDER HISTÓRICOS ATÉ O EOS ====================
-  // Para cada safra histórica, projetar a curva até o EOS da safra atual
-  // Isso permite ao usuário ver como as safras anteriores se comportaram
-  // no período equivalente (próximo à colheita)
-  if (eosDate) {
-    const eosTime = new Date(eosDate).getTime()
-    const dayMs = 24 * 60 * 60 * 1000
-    const MIN_NDVI = 0.18
-    
-    keys.forEach(key => {
-      // Encontrar os últimos pontos com dados para este histórico
-      const pointsWithData: { idx: number, value: number, date: string }[] = []
-      chartData.forEach((entry, idx) => {
-        if (entry[key] !== undefined && entry[key] !== null) {
-          pointsWithData.push({ idx, value: entry[key], date: entry.date })
-        }
-      })
-      
-      if (pointsWithData.length < 5) return // Precisa de dados suficientes
-      
-      // Pegar os últimos 10 pontos para calcular a tendência
-      const lastPoints = pointsWithData.slice(-10)
-      const lastPoint = lastPoints[lastPoints.length - 1]
-      const lastPointDate = new Date(lastPoint.date).getTime()
-      
-      // Se o último ponto está antes do EOS, estender
-      if (lastPointDate < eosTime) {
-        // Calcular tendência (slope) dos últimos pontos
-        const n = lastPoints.length
-        let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0
-        lastPoints.forEach((p, i) => {
-          sumX += i
-          sumY += p.value
-          sumXY += i * p.value
-          sumX2 += i * i
-        })
-        const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
-        
-        // Se a tendência é de queda (slope negativo), projetar
-        // Se está subindo ou estável, não projetar (dados podem estar incompletos)
-        if (slope < -0.002) { // Queda de pelo menos 0.2% por intervalo
-          // Calcular taxa de decaimento exponencial baseada no slope
-          const decayRate = Math.abs(slope) / Math.max(0.3, lastPoint.value - MIN_NDVI)
-          
-          // Encontrar as datas após o último ponto histórico até o EOS
-          chartData.forEach((entry, idx) => {
-            if (idx > lastPoint.idx && entry[key] === undefined) {
-              const entryTime = new Date(entry.date).getTime()
-              
-              // Só projetar até 7 dias após o EOS
-              if (entryTime <= eosTime + 7 * dayMs) {
-                const daysFromLast = (entryTime - lastPointDate) / dayMs
-                
-                // Projeção exponencial suavizada
-                const projectedValue = MIN_NDVI + (lastPoint.value - MIN_NDVI) * Math.exp(-decayRate * daysFromLast)
-                
-                // Limitar ao MIN_NDVI
-                entry[key] = Math.max(MIN_NDVI, projectedValue)
-              }
-            }
-          })
-        }
-      }
-    })
-  }
   
   // Estender dados até a colheita prevista (se disponível)
   if (eosDate && chartData.length > 0) {

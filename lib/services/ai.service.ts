@@ -8,7 +8,8 @@ import { getTemplate } from '@/lib/templates'
 import type { AnalysisContext, AnalysisResult } from '@/lib/templates/types'
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || ''
-const MODEL_NAME = 'gemini-2.0-flash'
+// Gemini 3 Flash Preview - modelo mais recente (Dec 2025)
+const MODEL_NAME = 'gemini-3-flash-preview'
 
 interface AIServiceConfig {
   maxRetries: number
@@ -56,12 +57,16 @@ export async function runAnalysis(
   }
 
   // Tentar análise com IA
+  console.log(`[AI] Iniciando análise com Gemini para template: ${templateId}`)
+  
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY })
       
       const systemPrompt = template.buildSystemPrompt()
       const userPrompt = template.buildUserPrompt(context)
+      
+      console.log(`[AI] Tentativa ${attempt + 1}/${maxRetries + 1} - Chamando ${MODEL_NAME}`)
       
       const response = await ai.models.generateContent({
         model: MODEL_NAME,
@@ -73,9 +78,12 @@ export async function runAnalysis(
       })
 
       const text = response.text || ''
+      console.log(`[AI] Resposta recebida: ${text.substring(0, 200)}...`)
 
-      // Parsear resposta
-      const parsed = template.parseResponse(text)
+      // Parsear resposta (passando contexto para métricas algorítmicas)
+      const parsed = template.parseResponse(text, context)
+      
+      console.log(`[AI] Análise concluída com sucesso via ${MODEL_NAME}`)
 
       return {
         result: parsed,
@@ -84,7 +92,7 @@ export async function runAnalysis(
         modelUsed: MODEL_NAME
       }
     } catch (error) {
-      console.error(`AI analysis attempt ${attempt + 1} failed:`, error)
+      console.error(`[AI] Tentativa ${attempt + 1} falhou:`, error)
 
       if (attempt < maxRetries) {
         // Exponential backoff

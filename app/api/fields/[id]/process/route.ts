@@ -4,6 +4,7 @@ import { getFullReport, getComplementaryData } from '@/lib/services/merx.service
 import { calculatePhenology } from '@/lib/services/phenology.service'
 import { calculateSphericalArea } from '@/lib/services/geometry.service'
 import { calculateHistoricalCorrelation } from '@/lib/services/correlation.service'
+import { analyzeZarc } from '@/lib/services/zarc.service'
 
 interface RouteParams {
   params: { id: string }
@@ -105,6 +106,21 @@ export async function POST(
         field.cropType
       )
 
+      // Analisar ZARC para determinar janela de plantio e risco
+      const plantingDateForZarc = phenology.plantingDate 
+        ? new Date(phenology.plantingDate) 
+        : (field.plantingDateInput || null)
+      
+      const zarcAnalysis = analyzeZarc(
+        complementary.zarc_anual,
+        plantingDateForZarc
+      )
+
+      // Log ZARC se disponível
+      if (zarcAnalysis.window) {
+        console.log(`[PROCESS] ZARC: Janela ${zarcAnalysis.window.windowStart.toISOString().split('T')[0]} - ${zarcAnalysis.window.windowEnd.toISOString().split('T')[0]}, Status: ${zarcAnalysis.plantingStatus}`)
+      }
+
       // Salvar ou atualizar AgroData
       await prisma.agroData.upsert({
         where: { fieldId: params.id },
@@ -131,6 +147,12 @@ export async function POST(
           rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
           rawAreaData: JSON.stringify({ area_ha: areaHa }),
           rawZarcData: JSON.stringify(complementary.zarc_anual),
+          zarcWindowStart: zarcAnalysis.window?.windowStart || null,
+          zarcWindowEnd: zarcAnalysis.window?.windowEnd || null,
+          zarcOptimalStart: zarcAnalysis.window?.optimalStart || null,
+          zarcOptimalEnd: zarcAnalysis.window?.optimalEnd || null,
+          zarcPlantingRisk: zarcAnalysis.plantingRisk,
+          zarcPlantingStatus: zarcAnalysis.plantingStatus !== 'UNKNOWN' ? zarcAnalysis.plantingStatus : null,
           diagnostics: JSON.stringify(phenology.diagnostics),
           updatedAt: new Date()
         },
@@ -158,6 +180,12 @@ export async function POST(
           rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
           rawAreaData: JSON.stringify({ area_ha: areaHa }),
           rawZarcData: JSON.stringify(complementary.zarc_anual),
+          zarcWindowStart: zarcAnalysis.window?.windowStart || null,
+          zarcWindowEnd: zarcAnalysis.window?.windowEnd || null,
+          zarcOptimalStart: zarcAnalysis.window?.optimalStart || null,
+          zarcOptimalEnd: zarcAnalysis.window?.optimalEnd || null,
+          zarcPlantingRisk: zarcAnalysis.plantingRisk,
+          zarcPlantingStatus: zarcAnalysis.plantingStatus !== 'UNKNOWN' ? zarcAnalysis.plantingStatus : null,
           diagnostics: JSON.stringify(phenology.diagnostics)
         }
       })
@@ -278,16 +306,43 @@ export async function POST(
       // Construir mensagem de erro/warning
       const errorMessage = warnings.length > 0 ? warnings.join('; ') : null
 
-      // Atualizar status do talhão
-      await prisma.field.update({
+      // Atualizar status do talhão e incrementar versão dos dados
+      const updatedField = await prisma.field.update({
         where: { id: params.id },
         data: {
           status: finalStatus,
           errorMessage,
           areaHa,
-          processedAt: new Date()
+          processedAt: new Date(),
+          dataVersion: { increment: 1 }
         }
       })
+
+      // Marcar análises existentes como desatualizadas e enfileirar reprocessamento
+      const staleAnalyses = await prisma.analysis.findMany({
+        where: { fieldId: params.id }
+      })
+
+      if (staleAnalyses.length > 0) {
+        // Importar dinamicamente para evitar problemas de circular dependency
+        const { enqueueAnalysis } = await import('@/lib/services/analysis-queue.service')
+        
+        await prisma.analysis.updateMany({
+          where: { fieldId: params.id },
+          data: {
+            isStale: true,
+            staleReason: 'Talhão reprocessado',
+            reprocessStatus: 'PENDING'
+          }
+        })
+
+        // Enfileirar cada análise para reprocessamento
+        for (const analysis of staleAnalyses) {
+          enqueueAnalysis(params.id, analysis.templateId, analysis.id)
+        }
+
+        console.log(`[PROCESS] ${staleAnalyses.length} análises marcadas para reprocessamento`)
+      }
 
       return NextResponse.json({
         success: finalStatus === 'SUCCESS',

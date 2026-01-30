@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.0.9'
+export const APP_VERSION = '0.0.14'
 
 // Fases do produto
 export const VERSION_PHASES = {
@@ -23,81 +23,67 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   // ==================== ALPHA (0.0.x) ====================
+  // Changelog consolidado - apenas features finais implementadas
+  
   {
-    version: '0.0.9',
+    version: '0.0.14',
     date: '2026-01-30',
-    title: 'Extensão de Históricos e Deploy',
+    title: 'Análise Híbrida e IA Aprimorada',
     type: 'improvement',
     changes: [
-      'Linhas históricas estendidas até a data de EOS',
-      'Visualização completa do declínio de safras anteriores',
-      'Deploy CapRover configurado e funcional',
-      'Endpoint /api/health para monitoramento',
+      'Modelo IA: Gemini 3 Flash Preview',
+      'Métricas algorítmicas (datas, volumes) + IA qualitativa (riscos)',
+      'Tooltips explicando cálculo de cada métrica',
+      'Reprocessamento com atualização automática (polling)',
+      'Correção de timezone nas datas',
+    ],
+  },
+  {
+    version: '0.0.10',
+    date: '2026-01-30',
+    title: 'ZARC e Reprocessamento',
+    type: 'feature',
+    changes: [
+      'Janela de plantio ZARC (dados oficiais MAPA)',
+      'Reprocessamento automático de análises ao atualizar talhão',
+      'Sistema de fila com retry e indicadores visuais',
+      'Históricos alinhados por calendário agrícola',
     ],
   },
   {
     version: '0.0.8',
     date: '2026-01-30',
-    title: 'Disclaimer Alpha e Abas Logísticas',
+    title: 'Diagnóstico Logístico Avançado',
     type: 'feature',
     changes: [
-      'Disclaimer obrigatório no primeiro login (termos Alpha)',
-      'Diagnóstico Logístico com 3 abas: Overview, Produtor, Unidade de Recebimento',
-      'Filtro por produtor(es) no diagnóstico logístico',
-      'Versionamento ajustado para Alpha (0.0.x)',
+      'Abas: Overview, Produtor, Unidade de Recebimento',
+      'Filtro por produtor(es) com recálculo dinâmico',
+      'Disclaimer obrigatório (termos Alpha)',
+      'Deploy CapRover configurado',
     ],
   },
   {
     version: '0.0.7',
     date: '2026-01-29',
-    title: 'Projeção Adaptativa e EOS Dinâmico',
+    title: 'Projeção Adaptativa',
     type: 'improvement',
     changes: [
-      'Detecção automática de fase: vegetativo, reprodutivo, senescência',
-      'Senescência: decaimento exponencial (curva suave)',
-      'Vegetativo próximo ao platô: min(tendência, histórico)',
-      'EOS dinâmico: colheita calculada por tendência real',
-      'Limites biológicos: NDVI máx 0.92, mín 0.18',
-    ],
-  },
-  {
-    version: '0.0.6',
-    date: '2026-01-29',
-    title: 'Produtores e Culturas',
-    type: 'feature',
-    changes: [
-      'Cadastro de produtores (nome e CPF opcional)',
-      'Vinculação de produtor ao talhão',
-      'Seleção de cultura: Soja ou Milho',
-      'Data de plantio informada pelo produtor (opcional)',
-      'Cálculos adaptados por tipo de cultura',
-      'Confiança aumentada quando plantio é informado',
+      'Detecção de fase fenológica (vegetativo, reprodutivo, senescência)',
+      'Projeção por decaimento exponencial na senescência',
+      'EOS dinâmico baseado em tendência real',
+      'Limites biológicos: NDVI 0.18-0.92',
     ],
   },
   {
     version: '0.0.5',
     date: '2026-01-29',
-    title: 'Gestão de Workspaces',
+    title: 'Multi-tenancy Completo',
     type: 'feature',
     changes: [
-      'Interface para criação de empresas/workspaces',
-      'Criação de admin inicial ao criar workspace',
-      'Limites configuráveis (usuários e talhões)',
-      'Ativação/desativação de workspaces',
-      'Hierarquia de permissões SUPER_ADMIN > ADMIN',
-    ],
-  },
-  {
-    version: '0.0.4',
-    date: '2026-01-29',
-    title: 'Multi-tenancy e Autenticação',
-    type: 'feature',
-    changes: [
-      'Sistema de workspaces para isolamento de dados',
-      'Autenticação com login e controle de acesso',
-      'Nova interface com sidebar',
-      'Gestão de usuários por workspace',
-      'Changelog integrado ao rodapé',
+      'Workspaces com isolamento de dados',
+      'Autenticação com login/senha e sidebar',
+      'Hierarquia SUPER_ADMIN > ADMIN > OPERATOR',
+      'Produtores e culturas (Soja/Milho)',
     ],
   },
   {
@@ -106,23 +92,9 @@ export const CHANGELOG: ChangelogEntry[] = [
     title: 'Diagnóstico Logístico',
     type: 'feature',
     changes: [
-      'Novo módulo de diagnóstico logístico',
-      'Curva de recebimento (bell curve)',
-      'Status PARTIAL para dados incompletos',
+      'Módulo de diagnóstico com curva de recebimento',
       'Mapa de propriedades monitoradas',
       'Timeline agregada de colheita',
-    ],
-  },
-  {
-    version: '0.0.2',
-    date: '2026-01-28',
-    title: 'Visualizações NDVI Avançadas',
-    type: 'feature',
-    changes: [
-      'Linhas de referência no gráfico (plantio, SOS, EOS)',
-      'Curvas históricas alinhadas por fenologia',
-      'Projeção de colheita baseada em correlação',
-      'Métricas de confiança detalhadas',
     ],
   },
   {
@@ -132,10 +104,9 @@ export const CHANGELOG: ChangelogEntry[] = [
     type: 'feature',
     changes: [
       'Cadastro de talhões com desenho no mapa',
-      'Integração com API Merx',
-      'Detecção automática de fenologia',
-      'Templates de análise (Crédito, Logística, Risco)',
-      'Relatórios com IA',
+      'Integração com API Merx (NDVI, precipitação)',
+      'Detecção automática de fenologia (SOS, EOS, Peak)',
+      'Templates de análise com IA (Crédito, Logística, Risco)',
     ],
   },
 ]

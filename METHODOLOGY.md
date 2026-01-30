@@ -586,50 +586,92 @@ interface CreditAnalysisResult {
 
 ---
 
-### 9.2 Análise Logística
+### 9.2 Análise Logística (v2.0 - Híbrida)
 
 **Objetivo**: Planejar recepção e transporte de grãos.
 
 **Público**: Tradings, cooperativas, transportadoras.
 
-**Foco**: Quando começa colheita, volume diário, pico de demanda.
+**Arquitetura**: Híbrida (Algorítmica + IA)
 
-#### Cálculos Logísticos
+#### Métricas Algorítmicas (Calculadas pelo Sistema)
+
+Estas métricas são determinísticas e replicáveis:
 
 ```javascript
-// Capacidade de colheita
-const harvestDays = Math.ceil(areaHa / 60)  // ~60 ha/dia por colheitadeira
+// Início da colheita = EOS - 5 dias (preparação)
+const harvestStart = new Date(eosDate)
+harvestStart.setDate(harvestStart.getDate() - 5)
 
-// Volume diário
-const dailyVolume = volumeTotal / harvestDays
+// Duração baseada na área: 2 dias a cada 80 ha, mínimo 5 dias
+const daysToHarvest = Math.max(5, Math.ceil(areaHa / 80) * 2)
 
-// Carretas necessárias
-const trucksNeeded = Math.ceil(volumeTotal / 35)  // ~35 ton por carreta
+// Fim da colheita
+const harvestEnd = new Date(harvestStart)
+harvestEnd.setDate(harvestEnd.getDate() + daysToHarvest)
+
+// Pico: começa 2 dias após início, termina 2 dias antes do fim
+const peakStart = harvestStart + 2 dias
+const peakEnd = harvestEnd - 2 dias
+
+// Volume diário (80 ha/dia de colheita típico)
+const dailyVolume = (volumeTon / areaHa) * 80
+
+// Carretas necessárias (35 ton por viagem)
+const trucksNeeded = Math.ceil(volumeTon / 35)
 ```
+
+| Métrica | Fórmula | Fonte |
+|---------|---------|-------|
+| Início Colheita | EOS - 5 dias | ALGORITMO |
+| Fim Colheita | Início + max(5, ceil(área/80)*2) | ALGORITMO |
+| Início Pico | Início + 2 dias | ALGORITMO |
+| Fim Pico | Fim - 2 dias | ALGORITMO |
+| Volume Diário | (volTon / área) × 80 | ALGORITMO |
+| Carretas | ceil(volTon / 35) | ALGORITMO |
+
+#### Análise Qualitativa (Gerada por IA)
+
+A IA recebe as métricas pré-calculadas e foca na interpretação:
+
+| Análise | Critério | Fonte |
+|---------|----------|-------|
+| Risco Clima | Período da colheita vs sazonalidade | IA |
+| Risco Qualidade | Clima + área + duração | IA |
+| Riscos Identificados | Contexto regional | IA |
+| Recomendações | Ações práticas | IA |
 
 #### Classificação de Status
 
 | Status | Critério |
 |--------|----------|
-| **ÓTIMO** | Janela clara, sem risco climático, EOS fora período chuvoso |
-| **ATENÇÃO** | Janela apertada OU colheita prevista Jan-Mar (chuvas) |
-| **CRÍTICO** | Alto risco de atraso OU colheita em período crítico de chuvas |
+| **ÓTIMO** | weatherRisk = BAIXO |
+| **ATENÇÃO** | weatherRisk = MEDIO |
+| **CRÍTICO** | weatherRisk = ALTO |
 
-#### Métricas de Saída
+#### Interface de Saída
 
 ```typescript
 interface LogisticsAnalysisResult {
   status: 'OTIMO' | 'ATENCAO' | 'CRITICO'
-  harvestStart: string          // Data início colheita (DD/MM)
-  harvestEnd: string            // Data fim colheita
-  dailyVolume: number           // Toneladas por dia
-  peakStart: string             // Início do pico
-  peakEnd: string               // Fim do pico
-  trucksNeeded: number          // Carretas totais
-  weatherRisk: 'BAIXO' | 'MEDIO' | 'ALTO'
-  qualityRisk: 'BAIXO' | 'MEDIO' | 'ALTO'
+  metrics: {
+    // Algorítmico
+    harvestStart: string
+    harvestEnd: string
+    peakStart: string
+    peakEnd: string
+    dailyVolume: number
+    trucksNeeded: number
+    daysToHarvest: number
+    metricsSource: 'ALGORITHM'
+    // IA
+    weatherRisk: 'BAIXO' | 'MEDIO' | 'ALTO'
+    grainQualityRisk: 'BAIXO' | 'MEDIO' | 'ALTO'
+    analysisSource: 'AI' | 'FALLBACK'
+  }
   risks: string[]
   recommendations: string[]
+  summary: string
 }
 ```
 
@@ -725,6 +767,46 @@ interface RiskMatrixResult {
 
 ---
 
+## 11. Transparência de IA
+
+### 11.1 Modelo Utilizado
+
+O sistema utiliza **Google Gemini 3 Flash Preview** para análises qualitativas:
+
+| Característica | Valor |
+|----------------|-------|
+| Modelo | `gemini-3-flash-preview` |
+| SDK | `@google/genai` |
+| Uso | Riscos, recomendações, interpretações |
+| Fallback | Regras automáticas quando IA indisponível |
+
+### 11.2 Identificação Visual
+
+Todas as análises geradas por modelos de linguagem (LLM) exibem:
+
+- **Badge "Gerado por IA"**: Indicador visual roxo com ícone de sparkles
+- **Badge "Análise por Regras"**: Quando fallback é usado
+- **Tooltip explicativo**: Ao passar o mouse, exibe como os dados foram calculados
+
+### 11.3 Metodologias por Template
+
+| Template | Métricas | Fonte de Cálculo |
+|----------|----------|------------------|
+| **Logística** | Início/Fim Colheita | EOS ± dias baseado em área |
+| **Logística** | Volume Diário | Área × Produtividade ÷ Dias |
+| **Logística** | Riscos | Análise climática regional |
+| **Crédito** | Score | Correlação histórica + confiança |
+| **Crédito** | Garantia | Volume × preço mercado |
+| **Risco** | Scores | Matriz multidimensional |
+
+### 11.4 Dados ZARC (Zoneamento Agrícola)
+
+- **Fonte**: Dados oficiais do MAPA (Ministério da Agricultura)
+- **Uso**: Apenas informativo (badge no card de Plantio)
+- **Não afeta**: Cálculos de alinhamento ou projeção
+
+---
+
 ## Changelog
 
 | Versão | Data | Alterações |
@@ -733,7 +815,11 @@ interface RiskMatrixResult {
 | 1.1.0 | 2025-01 | Adicionado serviço de correlação robusta com Pearson |
 | 1.2.0 | 2026-01 | Alinhamento fenológico por SOS |
 | 1.3.0 | 2026-01 | Adicionado estado PARTIAL para dados incompletos |
-| 1.4.0 | 2026-01 | **Modelo de Projeção Adaptativa**: Detecção automática de fase fenológica (vegetativo/reprodutivo/senescência) com lógica de projeção diferenciada. Em senescência, usa min(Tendência, Histórico) para respeitar limites biológicos. |
+| 1.4.0 | 2026-01 | Modelo de Projeção Adaptativa com detecção de fase fenológica |
+| 1.5.0 | 2026-01 | Dados ZARC integrados para informação de janela de plantio |
+| 1.6.0 | 2026-01 | Transparência de IA: badges e tooltips explicativos |
+| 2.0.0 | 2026-01 | **Arquitetura Híbrida**: Métricas algorítmicas + análise qualitativa por IA |
+| 2.1.0 | 2026-01 | Gemini 3 Flash Preview, correção timezone, polling automático |
 
 ---
 

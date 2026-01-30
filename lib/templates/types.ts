@@ -77,7 +77,29 @@ export interface CreditAnalysisResult extends BaseAnalysisResult {
   }
 }
 
-// Logistics Template
+// Logistics Template - Métricas Algorítmicas (calculadas pelo sistema)
+export interface LogisticsAlgorithmicMetrics {
+  harvestStart: string
+  harvestEnd: string
+  peakStart: string
+  peakEnd: string
+  dailyVolume: number
+  trucksNeeded: number
+  daysToHarvest: number
+  source: 'ALGORITHM'
+}
+
+// Logistics Template - Análise Qualitativa (gerada por IA)
+export interface LogisticsAIAnalysis {
+  weatherRisk: 'BAIXO' | 'MEDIO' | 'ALTO'
+  grainQualityRisk: 'BAIXO' | 'MEDIO' | 'ALTO'
+  risks: string[]
+  recommendations: string[]
+  summary: string
+  source: 'AI' | 'FALLBACK'
+}
+
+// Logistics Template - Resultado Híbrido
 export interface LogisticsAnalysisResult extends BaseAnalysisResult {
   status: 'OTIMO' | 'ATENCAO' | 'CRITICO'
   metrics: {
@@ -89,6 +111,10 @@ export interface LogisticsAnalysisResult extends BaseAnalysisResult {
     weatherRisk: 'BAIXO' | 'MEDIO' | 'ALTO'
     grainQualityRisk: 'BAIXO' | 'MEDIO' | 'ALTO'
     trucksNeeded: number
+    // Novos campos para rastreabilidade
+    daysToHarvest?: number
+    metricsSource?: 'ALGORITHM'
+    analysisSource?: 'AI' | 'FALLBACK'
   }
 }
 
@@ -115,6 +141,6 @@ export interface TemplateDefinition {
   config: TemplateConfig
   buildSystemPrompt: () => string
   buildUserPrompt: (context: AnalysisContext) => string
-  parseResponse: (response: any) => AnalysisResult
+  parseResponse: (response: any, context?: AnalysisContext) => AnalysisResult
   getFallbackResult: (context: AnalysisContext) => AnalysisResult
 }

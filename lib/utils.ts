@@ -7,11 +7,21 @@ export function cn(...inputs: ClassValue[]) {
 
 export function formatDate(date: Date | string | null | undefined): string {
   if (!date) return '---'
-  const d = typeof date === 'string' ? new Date(date) : date
-  return d.toLocaleDateString('pt-BR', {
+  
+  // Se é string no formato ISO, extrair apenas a parte da data para evitar timezone issues
+  if (typeof date === 'string') {
+    // Formato: "2026-02-26" ou "2026-02-26T00:00:00.000Z"
+    const datePart = date.split('T')[0]
+    const [year, month, day] = datePart.split('-')
+    return `${day}/${month}/${year}`
+  }
+  
+  // Para objetos Date, usar UTC para evitar conversão de timezone
+  return date.toLocaleDateString('pt-BR', {
     day: '2-digit',
     month: '2-digit',
-    year: 'numeric'
+    year: 'numeric',
+    timeZone: 'UTC'
   })
 }
 

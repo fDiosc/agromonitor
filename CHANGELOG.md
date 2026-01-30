@@ -18,308 +18,158 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 
 Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de dados.
 
+> **Nota**: Este changelog foi consolidado. Versões intermediárias com correções que foram posteriormente refinadas foram mescladas nas versões finais.
+
 ---
 
-## [0.0.9] - 2026-01-30
+## [0.0.14] - 2026-01-30
 
-### Adicionado
+### Análise Híbrida e IA Aprimorada
 
-#### Extensão de Históricos até EOS
-- Linhas históricas agora são projetadas até a data de EOS prevista
-- Permite ao usuário visualizar como safras anteriores se comportaram no período de colheita
-- Projeção usa modelo de decaimento exponencial baseado na tendência observada
-- Aplicado apenas quando há tendência de queda detectada (slope < -0.002)
+**Arquitetura Híbrida** - Separação clara entre cálculos algorítmicos e análise por IA:
 
-### Corrigido
+| Tipo | Métricas | Fonte |
+|------|----------|-------|
+| **Algorítmico** | Início/Fim Colheita, Pico, Volume Diário, Carretas | Fórmulas determinísticas |
+| **IA Qualitativa** | Risco Clima, Risco Qualidade, Recomendações | Gemini 3 Flash Preview |
 
-#### Deploy CapRover
-- Criada pasta `public/` (antes ausente)
-- Atualizado Dockerfile para Node 20 (compatibilidade com @google/genai)
-- Adicionado `DATABASE_URL` placeholder para build
-- Adicionado endpoint `/api/health` para health checks
-- Configurada porta 3000 corretamente no CapRover
+**Melhorias de UX**:
+- Tooltips explicando cálculo de cada métrica (ícone ℹ️)
+- Badge "Análise por IA" apenas na seção qualitativa
+- Reprocessamento com atualização automática (polling a cada 2s)
+- Correção de timezone nas datas (EOS, Plantio)
+
+**Técnico**:
+- Modelo IA: `gemini-3-flash-preview`
+- Queue chama `runAnalysis()` diretamente (bypass HTTP)
+- Limite de 30 tentativas no polling (1 minuto)
+
+---
+
+## [0.0.10] - 2026-01-30
+
+### ZARC e Reprocessamento Automático
+
+**ZARC (Zoneamento Agrícola de Risco Climático)**:
+- Janela de plantio por cultura e região (dados oficiais MAPA)
+- Indicador visual: Janela Ideal / Risco Moderado / Risco Alto
+- Integrado ao card de Plantio Estimado
+
+**Reprocessamento Automático**:
+- Análises reprocessam automaticamente ao atualizar talhão
+- Sistema de fila com 3 tentativas e backoff exponencial
+- Indicadores visuais: "Atualizado", "Na fila", "Processando", "Falhou"
+- Botão de reprocessar manual para análises com falha
+
+**Alinhamento Histórico**:
+- Históricos alinhados por calendário agrícola (mesmo mês/dia)
+- Linhas históricas estendidas até EOS (decaimento exponencial)
 
 ---
 
 ## [0.0.8] - 2026-01-30
 
-### Adicionado
+### Diagnóstico Logístico Avançado
 
-#### Disclaimer de Termos Alpha
-- Modal obrigatório exibido no primeiro login de cada usuário
-- 7 termos de uso cobrindo: versão Alpha, bugs, verificação de dados, reporte, disponibilidade, persistência e descontinuação
-- Campos no usuário: `hasAcceptedDisclaimer`, `disclaimerAcceptedAt`, `disclaimerVersionAccepted`
-- API `/api/auth/accept-disclaimer` para registrar aceitação
+**Abas**:
+- **Overview**: Visão consolidada de todos os talhões
+- **Produtor**: Filtro por produtor(es) com recálculo dinâmico
+- **Unidade de Recebimento**: Em desenvolvimento
 
-#### Abas no Diagnóstico Logístico
-- Reestruturação em 3 abas: **Overview**, **Produtor**, **Unidade de Recebimento**
-- **Overview**: Visão consolidada (conteúdo original)
-- **Produtor**: Filtro por um ou mais produtores
-  - Seleção múltipla com chips visuais
-  - Recálculo dinâmico de métricas, timeline, curva e mapa
-  - Exibe apenas produtores vinculados a talhões processados
-- **Unidade de Recebimento**: Placeholder (em desenvolvimento)
+**Disclaimer Alpha**:
+- Modal obrigatório no primeiro login
+- 7 termos cobrindo: bugs, verificação de dados, disponibilidade, persistência
 
-#### Versionamento Estruturado
-- Convenção de versões: Alpha (0.0.x), Beta (0.1.x), V1 (1.x.x)
-- Helper `getCurrentPhase()` para identificar fase atual
-- Tabela de versionamento no CHANGELOG
-
-### Alterado
-- Versão atualizada de 0.7.0 para 0.0.8 (formato Alpha)
-- API `/api/logistics/diagnostic` agora retorna `producerId` e `producerName` dos talhões
+**Deploy**:
+- CapRover configurado com Dockerfile Node 20
+- Endpoint `/api/health` para monitoramento
 
 ---
 
 ## [0.0.7] - 2026-01-29
 
-### Adicionado
+### Projeção Adaptativa por Fase Fenológica
 
-#### Modelo de Projeção Adaptativa por Fase Fenológica
-- Detecção automática de fase fenológica usando regressão linear:
-  - **Vegetativo** (slope > 0.5%/dia): NDVI subindo
-  - **Reprodutivo** (|slope| < 0.5%/dia): NDVI estável (platô)
-  - **Senescência** (slope < -0.5%/dia): NDVI caindo
-- Lógica de projeção diferenciada por fase:
-  - **Vegetativo**: 60% tendência + 40% histórico (limite 0.92)
-  - **Vegetativo (platô)**: min(tendência, histórico) quando NDVI > 0.80
-  - **Reprodutivo**: usa histórico (padrão típico)
-  - **Senescência**: decaimento exponencial (limite 0.18)
-- Validação estatística com R² e teste de significância
+**Detecção de Fase** (regressão linear últimos 14 dias):
+- **Vegetativo** (slope > 0.5%/dia): 60% tendência + 40% histórico
+- **Reprodutivo** (|slope| < 0.5%/dia): Usa histórico
+- **Senescência** (slope < -0.5%/dia): Decaimento exponencial
 
-#### EOS Dinâmico (Previsão de Colheita)
-- Cálculo dinâmico da data de colheita baseado em tendência de senescência
-- Critérios rigorosos: slope < -1%/dia, R² > 70%, NDVI < 85% do pico
-- Modelo exponencial para projetar quando NDVI cruza threshold de EOS
-- Exemplo: EOS dinâmico 17 dias antes do fixo (05/02 vs 22/02)
+**EOS Dinâmico**:
+- Colheita calculada por tendência real de senescência
+- Critérios: slope < -1%/dia, R² > 70%, NDVI < 85% do pico
 
-#### Fundamentos Científicos
-- Regressão Linear Simples (OLS) para detecção de tendência
-- Modelo de decaimento exponencial: `NDVI(t) = MIN + (NDVI_0 - MIN) × e^(-k×t)`
-- Princípio biológico: senescência é processo irreversível
-- R² > 0.7 para EOS dinâmico (confiança alta)
-
-### Corrigido
-- Projeção não mais "sobe" quando dados reais mostram queda
-- Curva de projeção agora é suave (exponencial), sem linha reta no limite
-- Data de colheita agora reflete tendência real, não apenas ciclo típico
-- Projeção vegetativa não mais sobe indefinidamente quando próximo do platô
-- Limite biológico de NDVI máximo (0.92) aplicado
-
-### Documentação
-- Nova seção no METHODOLOGY.md: "Projeção Adaptativa por Fase Fenológica"
-- Subseção "EOS Dinâmico" com exemplos práticos
-- Explicação completa dos fundamentos estatísticos e biológicos
-
----
-
-## [0.0.6] - 2026-01-29
-
-### Adicionado
-
-#### Cadastro de Produtores
-- Nova entidade `Producer` com nome (obrigatório) e CPF (opcional)
-- Página `/producers` para gestão de produtores
-- API CRUD completa (`/api/producers`)
-- Vinculação de produtor ao talhão (opcional)
-
-#### Tipos de Cultura
-- Campo `cropType` com opções SOJA e MILHO
-- Ciclos e limiares ajustados por cultura
-- Default: SOJA
-
-#### Data de Plantio Informada
-- Campo opcional `plantingDateInput` no cadastro de talhão
-- Quando informada, é usada como base confiável para cálculos
-- Aumenta o score de confiança da análise (+25 pontos)
-- SOS e EOS são calculados a partir da data informada
-
-### Alterado
-- Formulário de cadastro de talhão com novos campos
-- Serviço de fenologia agora aceita data de plantio do produtor
-- Templates de análise usam `cropType` em vez de `crop`
+**Limites Biológicos**:
+- NDVI máximo: 0.92 (platô vegetativo)
+- NDVI mínimo: 0.18 (solo/palha residual)
 
 ---
 
 ## [0.0.5] - 2026-01-29
 
-### Adicionado
+### Multi-tenancy Completo
 
-#### Gestão de Workspaces (SUPER_ADMIN)
-- Nova página `/admin/workspaces` para gerenciar empresas/clientes
-- API `/api/admin/workspaces` para CRUD de workspaces
-- Criação de workspace com admin inicial (opcional)
-- Limites configuráveis: máximo de usuários e talhões por workspace
-- Toggle de ativação/desativação de workspaces
-- Visualização de detalhes e usuários por workspace
+**Workspaces**:
+- Isolamento completo de dados por empresa
+- Limites configuráveis (usuários e talhões)
+- Ativação/desativação de workspaces
 
-#### Hierarquia de Permissões
-- Role `SUPER_ADMIN` para gestão global da plataforma
-- `SUPER_ADMIN` pode criar/gerenciar workspaces
-- `SUPER_ADMIN` pode adicionar usuários a qualquer workspace
-- `ADMIN` gerencia apenas usuários do próprio workspace
+**Autenticação**:
+- Login com JWT
+- Primeiro acesso com senha temporária
+- Interface com sidebar
 
-### Alterado
-- Sidebar agora exibe item "Workspaces" apenas para SUPER_ADMIN
-- Documentação atualizada com fluxos de multi-tenancy
+**Hierarquia de Permissões**:
+- `SUPER_ADMIN` → `ADMIN` → `OPERATOR`
 
----
-
-## [0.0.4] - 2026-01-29
-
-### Adicionado
-
-#### Multi-tenancy
-- Modelo `Workspace` para segregação de dados por empresa
-- Modelo `User` com autenticação e roles
-- Isolamento completo de dados entre workspaces
-- Middleware de autenticação e proteção de rotas
-- Filtro automático de dados por `workspaceId`
-
-#### Sistema de Autenticação
-- Página de login (`/login`)
-- Página de troca de senha (`/change-password`)
-- JWT para gerenciamento de sessões
-- Fluxo de primeiro acesso com senha temporária
-- Endpoints de autenticação (`/api/auth/*`)
-
-#### Nova Interface (Sidebar)
-- Layout com sidebar fixa à esquerda
-- Navegação organizada por módulos
-- Menu de administração (Admin/Operator)
-- Rodapé com versão e changelog
-- Modal de changelog com histórico de versões
-
-#### Gestão de Usuários
-- Página `/admin/users` para CRUD de usuários
-- Reset de senha por admin
-- Ativação/desativação de usuários
-- Validação de roles e permissões
-
-### Alterado
-- Estrutura de rotas migrada para route groups `(authenticated)`
-- Todas APIs filtram dados por workspace do usuário logado
-- Header substituído por Sidebar
+**Produtores e Culturas**:
+- Cadastro de produtores (nome, CPF opcional)
+- Culturas: Soja e Milho com thresholds específicos
+- Data de plantio informada (+25 pontos confiança)
 
 ---
 
 ## [0.0.3] - 2026-01-29
 
-### Adicionado
+### Diagnóstico Logístico
 
-#### Módulo de Diagnóstico Logístico
-- Nova página `/dashboard/logistics` com visão consolidada
+**Módulo Novo** (`/dashboard/logistics`):
 - Cards de métricas agregadas (talhões, área, volume, carretas)
-- Timeline de janela de colheita (primeira, pico, última)
-- Gráfico de curva de recebimento (bell curve) com Recharts
-- Tabela de cronograma por talhão com ordenação
-- Indicadores críticos (dias até colheita, pico, risco, capacidade)
-- Mapa interativo com propriedades e marcadores por status
-- Botão de acesso no header principal
+- Curva de recebimento (bell curve)
+- Timeline de janela de colheita
+- Mapa interativo com propriedades
 
-#### Sistema de Status Parcial
-- Novo status `PARTIAL` para talhões com dados incompletos
-- Validação de dados críticos (SOS, EOS, confiança)
-- Badge amarelo com ícone de alerta na UI
-- Mensagem de erro visível na tabela (hover para detalhes)
-- Endpoint `/api/admin/fix-status` para correção de status inconsistentes
-
-#### Logging Estruturado
-- Logs detalhados no processamento de talhões
-- Mensagens de erro salvas no campo `errorMessage`
-- Warnings capturados e persistidos
-
-### Corrigido
-- Query Prisma inválida no diagnóstico logístico (filtro de eosDate)
-- Talhões sem dados fenológicos não aparecem mais como SUCCESS
-- Pico de colheita na tabela agora mostra pico logístico (não fenológico)
-- yAxisId ausente no ReferenceLine do gráfico
-
-### Alterado
-- Filtro de talhões no diagnóstico: apenas SUCCESS com eosDate válido
-- Campo `errorMessage` agora retornado na API `/api/fields`
-
----
-
-## [0.2.0] - 2026-01-29
-
-### Adicionado
-
-#### Visualização de Gráfico NDVI
-- Linhas de referência para plantio, emergência (SOS) e colheita (EOS)
-- Curvas históricas de anos anteriores (H1, H2, H3)
-- Linha de projeção baseada em correlação histórica
-- Janela de colheita (início e fim) com linhas no gráfico
-- Tooltip personalizado com informações detalhadas
-
-#### Cálculo de Janela de Colheita
-- Harvest Start = EOS Date (fim do ciclo)
-- Harvest End = Start + (área / 50 ha/dia)
-- Integração com API de talhões
-
-#### Serviço de Correlação Robusta
-- Métrica composta: Pearson + RMSE + Aderência
-- Alinhamento fenológico preferencial
-- Fallback para alinhamento por índice
-
-### Corrigido
-- ReferenceLines não aparecendo (X axis mismatch)
-- Curvas históricas não visíveis (filtro muito restritivo)
-- Inconsistência entre percentuais do gráfico e cards
+**Status Parcial**:
+- Status `PARTIAL` para dados incompletos
+- Badge amarelo com hover para detalhes
 
 ---
 
 ## [0.0.1] - 2026-01-27
 
-### Adicionado
+### MVP Inicial
 
-#### Infraestrutura Base
-- Projeto Next.js 14 com App Router
-- Prisma ORM com PostgreSQL (Neon)
-- Estrutura de API Routes
+**Infraestrutura**:
+- Next.js 14 com App Router
+- Prisma ORM + PostgreSQL (Neon)
 - Componentes Shadcn/ui
 
-#### Monitoramento de Talhões
-- CRUD completo de talhões
-- Upload de geometria (KML/GeoJSON)
-- Desenho de polígonos no mapa
+**Monitoramento de Talhões**:
+- Cadastro com desenho no mapa ou upload KML/GeoJSON
 - Geocodificação reversa automática
-- Validação de geometrias
 
-#### Integração Merx API
-- Consulta NDVI (atual e histórico)
-- Consulta precipitação
-- Consulta solo
-- Consulta área de lavoura
-- Tratamento de erros e timeouts
+**Integração Merx API**:
+- NDVI (atual e histórico 3 safras)
+- Precipitação, solo, área cultivada
 
-#### Detecção de Fenologia
-- Identificação de SOS (emergência)
-- Identificação de EOS (colheita)
-- Identificação de Peak (pico NDVI)
-- Detecção de replantio
-- Cálculo de dias de ciclo
+**Detecção de Fenologia**:
+- SOS, EOS, Peak, Replantio
 - Score de confiança
 
-#### Sistema de Templates
-- Template de Crédito
-- Template de Logística
-- Template de Matriz de Risco
-- Integração com Gemini AI para análises
-
-#### Relatórios
-- Página de relatório detalhado por talhão
-- Cards de métricas
-- Gráfico NDVI base
-- Componente de reprocessamento
-
-### Documentação
-- produto.md - Visão do produto
-- melhorias.md - Análise de melhorias
-- IMPLEMENTACAO.md - Plano de implementação
-- logic.md - Melhorias de lógica
-- METHODOLOGY.md - Metodologias técnicas
-- DIAGNOSTICOLOG.md - Especificação módulo logístico
+**Templates de Análise com IA**:
+- Crédito (risco de garantias)
+- Logística (planejamento de colheita)
+- Matriz de Risco (visão 360°)
 
 ---
 
@@ -327,7 +177,5 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 - **Adicionado** - Novas funcionalidades
 - **Alterado** - Mudanças em funcionalidades existentes
-- **Depreciado** - Funcionalidades que serão removidas em breve
-- **Removido** - Funcionalidades removidas
 - **Corrigido** - Correções de bugs
-- **Segurança** - Correções de vulnerabilidades
+- **Técnico** - Detalhes de implementação

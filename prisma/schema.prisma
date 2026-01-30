@@ -115,6 +115,9 @@ model Field {
   status          String   @default("PENDING") // PENDING, PROCESSING, SUCCESS, PARTIAL, ERROR
   errorMessage    String?
 
+  // Versionamento de dados - incrementa a cada processamento
+  dataVersion Int @default(1)
+
   // Data de plantio informada pelo produtor (opcional)
   // Se informada, é usada como base 100% confiável para cálculos
   plantingDateInput DateTime?
@@ -192,6 +195,14 @@ model AgroData {
   rawAreaData       String?
   rawZarcData       String?
 
+  // ZARC - Janela de Plantio
+  zarcWindowStart   DateTime?  // Início da janela de plantio ZARC
+  zarcWindowEnd     DateTime?  // Fim da janela de plantio ZARC
+  zarcOptimalStart  DateTime?  // Início da janela ideal (ZARC = 20)
+  zarcOptimalEnd    DateTime?  // Fim da janela ideal (ZARC = 20)
+  zarcPlantingRisk  Int?       // Risco no momento do plantio (0/20/30/40)
+  zarcPlantingStatus String?   // IDEAL | MODERATE | HIGH_RISK | OUT_OF_WINDOW
+
   // Diagnósticos do processamento
   diagnostics String? // JSON array of diagnostics
 
@@ -230,14 +241,24 @@ model Analysis {
   processingTimeMs Int?
   fallbackUsed     Boolean @default(false)
 
+  // Controle de versão e reprocessamento
+  dataVersion      Int       @default(1)    // Versão dos dados quando gerada
+  isStale          Boolean   @default(false) // Se está desatualizada
+  staleReason      String?                   // Motivo da desatualização
+  reprocessStatus  String?                   // PENDING | PROCESSING | COMPLETED | FAILED
+  reprocessError   String?                   // Erro se falhou
+  reprocessedAt    DateTime?                 // Última tentativa de reprocessamento
+
   // Relação com Field
   fieldId String
   field   Field  @relation(fields: [fieldId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   @@unique([fieldId, templateId])
   @@index([fieldId, templateId])
+  @@index([isStale, reprocessStatus])
 }
 
 // ==================== TEMPLATES DE ANÁLISE ====================
