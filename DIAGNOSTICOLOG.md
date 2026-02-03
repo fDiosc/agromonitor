@@ -508,6 +508,8 @@ A Carteira de Monitoramento agora possui filtros:
 | Filtros Dashboard | ✅ Implementado | Status, caixa, tipo |
 | Gerenciar Talhões | ✅ Implementado | Cards clicáveis como filtros |
 | Distâncias Persistidas | ✅ Implementado | Calculadas e salvas no banco |
+| Reprocessamento Assíncrono | ✅ Implementado | Polling até 6 minutos |
+| Gestão de Usuários | ✅ Implementado | SUPER_ADMIN em qualquer workspace |
 | Filtros avançados | ⏳ Pendente | Por período, região |
 | Exportação | ⏳ Pendente | PDF, Excel |
 | Notificações | ⏳ Pendente | Push alerts |
@@ -516,4 +518,4 @@ A Carteira de Monitoramento agora possui filtros:
 
 *Documento criado em: 29/01/2026*
 *Última atualização: 03/02/2026*
-*Versão: 1.3*
+*Versão: 1.4*

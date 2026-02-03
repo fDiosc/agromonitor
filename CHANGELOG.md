@@ -22,6 +22,28 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.18] - 2026-02-03
+
+### Gestão de Usuários e Estabilidade
+
+**Gestão de Usuários Aprimorada**:
+- SUPER_ADMIN pode criar usuários em qualquer workspace
+- Seletor de workspace no formulário de criação de usuário
+- SUPER_ADMIN pode criar outros SUPER_ADMINs
+- Validação de limites de usuários por workspace
+
+**Estabilidade de Processamento**:
+- Reprocessamento com polling assíncrono (fire and forget)
+- Suporte a processamentos de até 6 minutos
+- Verificação de status a cada 10 segundos
+- Feedback correto quando processamento termina
+
+**Técnico**:
+- API `/api/admin/users` aceita `workspaceId` para SUPER_ADMIN
+- Frontend usa polling em vez de aguardar resposta HTTP
+
+---
+
 ## [0.0.17] - 2026-02-03
 
 ### Filtros e Gestão de Talhões

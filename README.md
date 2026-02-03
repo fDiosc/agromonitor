@@ -178,9 +178,9 @@ merx-agro-mvp/
 
 | Role | Pode fazer |
 |------|-----------|
-| `SUPER_ADMIN` | Criar/gerenciar workspaces, todos os usuários |
-| `ADMIN` | Gerenciar usuários do próprio workspace |
-| `OPERATOR` | Criar/editar talhões |
+| `SUPER_ADMIN` | Criar/gerenciar workspaces, criar usuários em qualquer workspace, criar outros SUPER_ADMINs |
+| `ADMIN` | Gerenciar usuários do próprio workspace (criar, resetar senha, ativar/desativar) |
+| `OPERATOR` | Criar/editar talhões, produtores |
 | `VIEWER` | Apenas visualizar |
 
 ### Fluxo de Primeiro Acesso

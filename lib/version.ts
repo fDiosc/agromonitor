@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.0.17'
+export const APP_VERSION = '0.0.18'
 
 // Fases do produto
 export const VERSION_PHASES = {
@@ -25,6 +25,18 @@ export const CHANGELOG: ChangelogEntry[] = [
   // ==================== ALPHA (0.0.x) ====================
   // Changelog consolidado - apenas features finais implementadas
   
+  {
+    version: '0.0.18',
+    date: '2026-02-03',
+    title: 'Gestão de Usuários e Estabilidade',
+    type: 'improvement',
+    changes: [
+      'SUPER_ADMIN pode criar usuários em qualquer workspace',
+      'Seletor de workspace no formulário de criação de usuário',
+      'Reprocessamento com polling assíncrono (suporta até 6 minutos)',
+      'Correção de timeout em processamentos longos',
+    ],
+  },
   {
     version: '0.0.17',
     date: '2026-02-03',
