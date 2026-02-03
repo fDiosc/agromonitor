@@ -17,7 +17,8 @@ import {
   Key,
   Trash2,
   AlertCircle,
-  X
+  X,
+  Building2
 } from 'lucide-react'
 
 interface User {
@@ -29,6 +30,22 @@ interface User {
   mustChangePassword: boolean
   lastLoginAt: string | null
   createdAt: string
+  workspace?: {
+    id: string
+    name: string
+    slug: string
+  }
+}
+
+interface Workspace {
+  id: string
+  name: string
+  slug: string
+}
+
+interface CurrentUser {
+  role: string
+  workspaceId: string
 }
 
 const roleLabels: Record<string, { label: string; color: string }> = {
@@ -40,6 +57,8 @@ const roleLabels: Record<string, { label: string; color: string }> = {
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<User[]>([])
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -50,6 +69,34 @@ export default function AdminUsersPage() {
   const [newEmail, setNewEmail] = useState('')
   const [newRole, setNewRole] = useState('OPERATOR')
   const [newPassword, setNewPassword] = useState('Mudar@123')
+  const [newWorkspaceId, setNewWorkspaceId] = useState('')
+
+  const fetchCurrentUser = async () => {
+    try {
+      const res = await fetch('/api/auth/me')
+      if (res.ok) {
+        const data = await res.json()
+        setCurrentUser({ role: data.user.role, workspaceId: data.user.workspaceId })
+        return data.user.role
+      }
+    } catch (err) {
+      console.error('Error fetching current user:', err)
+    }
+    return null
+  }
+
+  const fetchWorkspaces = async () => {
+    try {
+      const res = await fetch('/api/admin/workspaces')
+      if (res.ok) {
+        const data = await res.json()
+        setWorkspaces(data.workspaces || [])
+      }
+    } catch (err) {
+      // ADMIN não tem acesso a workspaces, tudo bem
+      console.log('Não é SUPER_ADMIN, não carregando workspaces')
+    }
+  }
 
   const fetchUsers = async () => {
     try {
@@ -65,7 +112,14 @@ export default function AdminUsersPage() {
   }
 
   useEffect(() => {
-    fetchUsers()
+    const init = async () => {
+      const role = await fetchCurrentUser()
+      if (role === 'SUPER_ADMIN') {
+        await fetchWorkspaces()
+      }
+      await fetchUsers()
+    }
+    init()
   }, [])
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -74,15 +128,22 @@ export default function AdminUsersPage() {
     setError(null)
 
     try {
+      const payload: any = {
+        name: newName,
+        email: newEmail,
+        role: newRole,
+        password: newPassword,
+      }
+      
+      // SUPER_ADMIN pode especificar workspace
+      if (currentUser?.role === 'SUPER_ADMIN' && newWorkspaceId) {
+        payload.workspaceId = newWorkspaceId
+      }
+
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newName,
-          email: newEmail,
-          role: newRole,
-          password: newPassword,
-        }),
+        body: JSON.stringify(payload),
       })
 
       if (!res.ok) {
@@ -95,6 +156,7 @@ export default function AdminUsersPage() {
       setNewEmail('')
       setNewRole('OPERATOR')
       setNewPassword('Mudar@123')
+      setNewWorkspaceId('')
       setShowCreateModal(false)
 
       // Refresh list
@@ -302,6 +364,31 @@ export default function AdminUsersPage() {
             </div>
 
             <form onSubmit={handleCreateUser} className="p-4 space-y-4">
+              {/* Seletor de Workspace - apenas para SUPER_ADMIN */}
+              {currentUser?.role === 'SUPER_ADMIN' && workspaces.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    <Building2 size={14} className="inline mr-1" />
+                    Workspace
+                  </label>
+                  <select
+                    value={newWorkspaceId}
+                    onChange={(e) => setNewWorkspaceId(e.target.value)}
+                    className="w-full p-2 border rounded-lg"
+                  >
+                    <option value="">Workspace atual</option>
+                    {workspaces.map((ws) => (
+                      <option key={ws.id} value={ws.id}>
+                        {ws.name} ({ws.slug})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Selecione em qual workspace criar o usuário
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   Nome
@@ -339,6 +426,9 @@ export default function AdminUsersPage() {
                   <option value="VIEWER">Visualizador</option>
                   <option value="OPERATOR">Operador</option>
                   <option value="ADMIN">Admin</option>
+                  {currentUser?.role === 'SUPER_ADMIN' && (
+                    <option value="SUPER_ADMIN">Super Admin</option>
+                  )}
                 </select>
               </div>
 

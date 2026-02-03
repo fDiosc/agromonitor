@@ -46,6 +46,9 @@ export async function GET() {
 /**
  * POST /api/admin/users
  * Cria um novo usuário no workspace
+ * 
+ * SUPER_ADMIN pode especificar workspaceId para criar em qualquer workspace
+ * ADMIN cria apenas no próprio workspace
  */
 export async function POST(request: Request) {
   try {
@@ -60,13 +63,36 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { name, email, role, password } = body
+    const { name, email, role, password, workspaceId: targetWorkspaceId } = body
 
     if (!name || !email || !password) {
       return NextResponse.json(
         { error: 'Nome, email e senha são obrigatórios' },
         { status: 400 }
       )
+    }
+
+    // Determinar workspace de destino
+    // SUPER_ADMIN pode criar em qualquer workspace
+    // ADMIN só pode criar no próprio workspace
+    let finalWorkspaceId = session.workspaceId
+    
+    if (targetWorkspaceId && session.role === 'SUPER_ADMIN') {
+      // Verificar se workspace existe
+      const targetWorkspace = await prisma.workspace.findUnique({
+        where: { id: targetWorkspaceId }
+      })
+      
+      if (!targetWorkspace) {
+        return NextResponse.json(
+          { error: 'Workspace não encontrado' },
+          { status: 400 }
+        )
+      }
+      
+      finalWorkspaceId = targetWorkspaceId
+    } else if (targetWorkspaceId && session.role !== 'SUPER_ADMIN') {
+      return forbiddenResponse('Apenas Super Admin pode criar usuários em outros workspaces')
     }
 
     // Verificar se email já existe
@@ -83,7 +109,7 @@ export async function POST(request: Request) {
 
     // Verificar limite de usuários
     const workspace = await prisma.workspace.findUnique({
-      where: { id: session.workspaceId },
+      where: { id: finalWorkspaceId },
       include: { users: { select: { id: true } } },
     })
 
@@ -96,11 +122,14 @@ export async function POST(request: Request) {
 
     // Validar role
     const validRoles = ['VIEWER', 'OPERATOR', 'ADMIN']
-    const userRole = validRoles.includes(role) ? role : 'VIEWER'
+    let userRole = validRoles.includes(role) ? role : 'VIEWER'
 
     // SUPER_ADMIN só pode ser criado por outro SUPER_ADMIN
-    if (role === 'SUPER_ADMIN' && session.role !== 'SUPER_ADMIN') {
-      return forbiddenResponse('Apenas Super Admin pode criar outro Super Admin')
+    if (role === 'SUPER_ADMIN') {
+      if (session.role !== 'SUPER_ADMIN') {
+        return forbiddenResponse('Apenas Super Admin pode criar outro Super Admin')
+      }
+      userRole = 'SUPER_ADMIN'
     }
 
     // Criar usuário
@@ -112,7 +141,7 @@ export async function POST(request: Request) {
         email: email.toLowerCase(),
         passwordHash,
         role: userRole,
-        workspaceId: session.workspaceId,
+        workspaceId: finalWorkspaceId,
         mustChangePassword: true,
       },
       select: {
@@ -122,6 +151,13 @@ export async function POST(request: Request) {
         role: true,
         isActive: true,
         createdAt: true,
+        workspace: {
+          select: {
+            id: true,
+            name: true,
+            slug: true
+          }
+        }
       },
     })
 
