@@ -22,6 +22,109 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.17] - 2026-02-03
+
+### Filtros e Gestão de Talhões
+
+**Visualização de Produtores**:
+- Clique em um produtor para expandir e ver todos os talhões vinculados
+- Informações exibidas: nome, localização, área, volume, status
+- Link direto para relatório de cada talhão
+
+**Filtros Avançados no Dashboard**:
+- Filtro por status: Todos, Processado, Processando, Pendente, Erro
+- Filtro por caixa logística: Todas, Sem atribuição, ou caixa específica
+- Filtro por tipo de atribuição: Manual, Produtor, Automático, Sem
+- Contador de talhões filtrados
+
+**Gerenciar Talhões**:
+- Cards de estatísticas agora são clicáveis (funcionam como filtros)
+- Título dinâmico baseado no filtro ativo
+- Contador "X de Y talhões"
+
+**Badges de Atribuição**:
+- Layout compacto em única linha: `[M] Nome da Caixa`
+- **M** (azul) = Manual/Direta
+- **P** (roxo) = Herdada do Produtor
+- **A** (verde) = Automática por raio
+- **!** (vermelho) = Sem cobertura
+
+**Correções**:
+- Glitch na sidebar: seleção duplicada ao navegar entre rotas similares
+- Filtro de caixas logísticas respeita atribuições manuais (não mostra em outras caixas)
+- Tabela de cobertura com colunas fixas e textos truncados
+
+---
+
+## [0.0.16] - 2026-02-03
+
+### Distâncias Persistentes e UX Simplificada
+
+**Persistência de Distâncias no Banco de Dados**:
+- Novo modelo `FieldLogisticsDistance` para armazenar distâncias calculadas
+- Distâncias entre talhões e caixas logísticas agora são persistidas
+- Performance melhorada: leitura do banco vs cálculo on-demand
+
+**Processamento Automático**:
+- Ao criar/editar uma caixa logística, calcula distâncias para todos os talhões
+- Ao criar um talhão, calcula distâncias para todas as caixas logísticas
+- Processamento assíncrono não bloqueia a resposta da API
+
+**Reprocessamento Manual**:
+- Botão na página de configurações para reprocessar todas as distâncias
+- Útil ao mudar método de cálculo (linha reta → rodoviário)
+- Feedback visual do resultado (talhões e distâncias processadas)
+
+**UX Simplificada - Diagnóstico Logístico**:
+- Seletor de caixas logísticas integrado no header do Overview
+- Ao selecionar caixas, filtra todos os dados (talhões, volumes, gráficos)
+- Removida aba "Unidade de Recebimento" (redundante com Overview filtrado)
+- Link direto para gerenciar caixas logísticas
+
+**Técnico**:
+- Novo serviço `logistics-distance.service.ts`
+- Endpoint `POST /api/logistics-units/reprocess`
+- APIs de cobertura e diagnóstico lêem dados persistidos do banco
+
+---
+
+## [0.0.15] - 2026-02-03
+
+### Caixas Logísticas (Unidades de Recebimento)
+
+**Novo Módulo de Caixas Logísticas**:
+- Cadastro de caixas logísticas (armazéns) com coordenadas e endereço
+- Raio de cobertura configurável (em km) para cada caixa
+- Mapa interativo com visualização de cobertura e interseções
+- Identificação automática de talhões em múltiplas áreas de cobertura
+
+**Integração com Diagnóstico Logístico**:
+- Aba "Unidade de Recebimento" agora funcional
+- Filtro por uma ou mais caixas logísticas
+- Estatísticas agregadas por caixa (volume, talhões, carretas)
+- Comparativo entre caixas selecionadas
+
+**Atribuição de Talhões a Caixas**:
+- Atribuição automática: talhão vai para caixa mais próxima dentro do raio
+- Atribuição herdada: talhão herda caixa padrão do produtor
+- Atribuição direta: override manual no cadastro do talhão
+- Indicador visual de interseções (talhão em múltiplos raios)
+
+**Configurações do Workspace**:
+- Nova página de configurações (`/settings`)
+- Toggle para método de cálculo de distância:
+  - Linha reta (Haversine) - padrão
+  - Distância rodoviária (Google Maps) - requer API key
+
+**Técnico**:
+- Novo modelo `LogisticsUnit` no Prisma
+- Serviço de cálculo de distância (`distance.service.ts`)
+- API `/api/logistics-units` com CRUD completo
+- API `/api/logistics-units/coverage` para relatório de cobertura
+- API `/api/logistics/diagnostic` aceita filtro `logisticsUnitIds`
+
+---
+
 ## [0.0.14] - 2026-01-30
 
 ### Análise Híbrida e IA Aprimorada

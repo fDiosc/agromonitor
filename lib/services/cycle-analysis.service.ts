@@ -785,6 +785,7 @@ export function prepareHistoricalOverlayData(
     
     // Encontrar a data mais distante com dados disponíveis (atual ou histórico)
     let maxAvailableDate = lastCurrentTime
+    let maxDateWithData = ''
     dateMap.forEach((entry, dateStr) => {
       const dateTime = new Date(dateStr).getTime()
       const hasData = entry.current !== undefined || 
@@ -793,8 +794,10 @@ export function prepareHistoricalOverlayData(
                       entry.h3 !== undefined
       if (hasData && dateTime > maxAvailableDate) {
         maxAvailableDate = dateTime
+        maxDateWithData = dateStr
       }
     })
+    console.log('[RANGE] dateMap.size:', dateMap.size, 'maxAvailableDate:', maxDateWithData || lastCurrentDate)
     
     // Determinar rangeEnd baseado em múltiplos critérios
     let rangeEnd: Date
@@ -818,17 +821,21 @@ export function prepareHistoricalOverlayData(
     }
     
     const rangeEndStr = rangeEnd.toISOString().split('T')[0]
+    console.log('[RANGE] rangeStart:', rangeStartStr, 'rangeEnd:', rangeEndStr, 'lastCurrentDate:', lastCurrentDate)
     
     // Garantir que existam pontos intermediários para projeção
     // Criar pontos a cada 1 dia do último dado até o fim do range
     const rangeEndTime = rangeEnd.getTime()
+    let pointsCreated = 0
     
     for (let t = lastCurrentTime + dayMs; t <= rangeEndTime; t += dayMs) {
       const dateStr = new Date(t).toISOString().split('T')[0]
       if (!dateMap.has(dateStr)) {
         dateMap.set(dateStr, { date: dateStr })
+        pointsCreated++
       }
     }
+    console.log('[RANGE] Criados', pointsCreated, 'pontos vazios para projeção')
     
     // Reconstruir chartData com os novos pontos
     chartData.length = 0
@@ -853,7 +860,9 @@ export function prepareHistoricalOverlayData(
   const phaseDetection = detectPhenologicalPhase(currentData)
   
   // Gerar projeção a partir do último ponto atual até o fim
+  console.log('[PROJECTION] chartData.length:', chartData.length, 'lastCurrentIdx:', lastCurrentIdx)
   if (lastCurrentIdx >= 0 && lastCurrentIdx < chartData.length - 1) {
+    console.log('[PROJECTION] Gerando projeção de', lastCurrentIdx + 1, 'até', chartData.length - 1, '=', chartData.length - lastCurrentIdx - 1, 'pontos')
     // Primeiro ponto da projeção = último valor atual (para continuidade)
     chartData[lastCurrentIdx].projection = lastCurrentValue
     

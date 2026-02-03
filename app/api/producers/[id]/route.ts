@@ -95,7 +95,7 @@ export async function PUT(
     }
 
     const body = await request.json()
-    const { name, cpf } = body
+    const { name, cpf, defaultLogisticsUnitId } = body
 
     if (name !== undefined && name.trim() === '') {
       return NextResponse.json(
@@ -114,11 +114,28 @@ export async function PUT(
       )
     }
 
+    // Validar caixa logística se fornecida
+    if (defaultLogisticsUnitId) {
+      const unit = await prisma.logisticsUnit.findFirst({
+        where: {
+          id: defaultLogisticsUnitId,
+          workspaceId: session.workspaceId
+        }
+      })
+      if (!unit) {
+        return NextResponse.json(
+          { error: 'Caixa logística não encontrada' },
+          { status: 400 }
+        )
+      }
+    }
+
     const producer = await prisma.producer.update({
       where: { id: params.id },
       data: {
         ...(name !== undefined && { name: name.trim() }),
         ...(cpfClean !== undefined && { cpf: cpfClean }),
+        ...(defaultLogisticsUnitId !== undefined && { defaultLogisticsUnitId: defaultLogisticsUnitId || null }),
       },
     })
 

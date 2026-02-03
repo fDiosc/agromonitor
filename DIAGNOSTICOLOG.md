@@ -429,19 +429,85 @@ function aggregateClimateRisk(fields: Field[]): 'low' | 'medium' | 'high' {
 
 ---
 
-## 10. Status de Implementação
+## 10. Caixas Logísticas (v0.0.15+)
+
+### 10.1 Conceito
+
+Caixas Logísticas são unidades de recebimento (armazéns) que podem ser cadastradas com:
+- Coordenadas (latitude/longitude)
+- Endereço (opcional)
+- Raio de cobertura em km
+
+### 10.2 Hierarquia de Atribuição
+
+Quando um talhão está dentro do raio de cobertura de uma ou mais caixas:
+
+| Prioridade | Tipo | Descrição |
+|------------|------|-----------|
+| 1 | **Manual (M)** | Atribuído diretamente no talhão |
+| 2 | **Produtor (P)** | Herdado da caixa padrão do produtor |
+| 3 | **Automático (A)** | Caixa mais próxima dentro do raio |
+
+### 10.3 Filtros por Caixa Logística
+
+O Overview agora possui um seletor de caixas logísticas que filtra:
+- Todos os cards de métricas
+- Gráfico de curva de recebimento
+- Tabela de talhões
+- Mapa de propriedades
+
+### 10.4 Visualização no Mapa
+
+- Caixas logísticas são exibidas como **triângulos** (diferente dos talhões)
+- Círculos de cobertura mostram o raio configurado
+- Cores indicam status: verde (coberto), amarelo (interseção), vermelho (fora)
+
+---
+
+## 11. Gestão de Talhões (v0.0.17)
+
+### 11.1 Página Gerenciar Talhões
+
+Acessível via sidebar, permite:
+- Visualizar todos os talhões e seus status de atribuição
+- Filtrar por cards clicáveis (Total, Interseção, Sem Atribuição, Direta)
+- Atribuir manualmente uma caixa logística a talhões em interseção
+
+### 11.2 Filtros no Dashboard Principal
+
+A Carteira de Monitoramento agora possui filtros:
+- **Status**: Todos, Processado, Processando, Pendente, Erro
+- **Caixa Logística**: Todas, Sem atribuição, ou caixa específica
+- **Tipo de Atribuição**: Manual, Produtor, Automático, Sem
+
+### 11.3 Badges de Atribuição
+
+| Badge | Cor | Significado |
+|-------|-----|-------------|
+| **M** | Azul | Manual/Direta |
+| **P** | Roxo | Herdada do Produtor |
+| **A** | Verde | Automática por raio |
+| **!** | Vermelho | Sem cobertura |
+
+---
+
+## 12. Status de Implementação
 
 | Componente | Status | Observações |
 |------------|--------|-------------|
-| Endpoint `/api/logistics/diagnostic` | ✅ Implementado | Filtra apenas SUCCESS com eosDate |
+| Endpoint `/api/logistics/diagnostic` | ✅ Implementado | Suporta filtro por caixas logísticas |
 | Página `/dashboard/logistics` | ✅ Implementado | Layout responsivo |
 | SummaryCards | ✅ Implementado | 4 métricas principais |
 | HarvestTimeline | ✅ Implementado | Primeira, pico, última colheita |
 | ReceiptCurve (Bell Curve) | ✅ Implementado | Com linha de capacidade |
 | FieldsSchedule (Tabela) | ✅ Implementado | Ordenável, com status |
 | CriticalAlerts | ✅ Implementado | 4 indicadores |
-| PropertiesMap | ✅ Implementado | Leaflet com marcadores |
-| Botão no Header | ✅ Implementado | Acesso direto |
+| PropertiesMap | ✅ Implementado | Leaflet com caixas e talhões |
+| Caixas Logísticas | ✅ Implementado | CRUD completo |
+| Seletor de Caixas | ✅ Implementado | Multi-select no header |
+| Filtros Dashboard | ✅ Implementado | Status, caixa, tipo |
+| Gerenciar Talhões | ✅ Implementado | Cards clicáveis como filtros |
+| Distâncias Persistidas | ✅ Implementado | Calculadas e salvas no banco |
 | Filtros avançados | ⏳ Pendente | Por período, região |
 | Exportação | ⏳ Pendente | PDF, Excel |
 | Notificações | ⏳ Pendente | Push alerts |
@@ -449,5 +515,5 @@ function aggregateClimateRisk(fields: Field[]): 'low' | 'medium' | 'high' {
 ---
 
 *Documento criado em: 29/01/2026*
-*Última atualização: 29/01/2026*
-*Versão: 1.1*
+*Última atualização: 03/02/2026*
+*Versão: 1.3*

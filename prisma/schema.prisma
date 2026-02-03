@@ -28,9 +28,10 @@ model Workspace {
   updatedAt DateTime @updatedAt
 
   // Relações
-  users     User[]
-  fields    Field[]
-  producers Producer[]
+  users          User[]
+  fields         Field[]
+  producers      Producer[]
+  logisticsUnits LogisticsUnit[]
 
   @@index([slug])
 }
@@ -76,6 +77,74 @@ enum UserRole {
   VIEWER      // Apenas visualização
 }
 
+// ==================== CAIXAS LOGÍSTICAS ====================
+
+model LogisticsUnit {
+  id   String @id @default(cuid())
+  name String
+
+  // Localização
+  latitude  Float?
+  longitude Float?
+  address   String?
+  city      String?
+  state     String?
+
+  // Área de atuação (raio em km, null = sem limite)
+  coverageRadiusKm Float?
+
+  // Status
+  isActive Boolean @default(true)
+
+  // Capacidade (para uso futuro)
+  dailyCapacityTons   Float?
+  storageCapacityTons Float?
+
+  // Multi-tenancy
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relacionamentos inversos
+  producers Producer[] // Produtores com esta caixa como default
+  fields    Field[]    // Talhões atribuídos diretamente
+  fieldDistances FieldLogisticsDistance[] // Distâncias calculadas
+
+  @@index([workspaceId])
+  @@index([workspaceId, isActive])
+}
+
+// ==================== DISTÂNCIAS TALHÃO-CAIXA ====================
+
+model FieldLogisticsDistance {
+  id String @id @default(cuid())
+
+  // Relacionamentos
+  fieldId          String
+  field            Field         @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  logisticsUnitId  String
+  logisticsUnit    LogisticsUnit @relation(fields: [logisticsUnitId], references: [id], onDelete: Cascade)
+
+  // Distância calculada
+  distanceKm       Float         // Distância em km
+  isWithinCoverage Boolean       // Se está dentro do raio de cobertura
+  
+  // Método usado no cálculo
+  calculationMethod String       // 'straight_line' | 'road_distance'
+
+  // Timestamps
+  calculatedAt DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([fieldId, logisticsUnitId])
+  @@index([fieldId])
+  @@index([logisticsUnitId])
+  @@index([isWithinCoverage])
+}
+
 // ==================== PRODUTORES ====================
 
 model Producer {
@@ -87,6 +156,11 @@ model Producer {
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id])
 
+  // Caixa logística padrão (opcional)
+  // Talhões sem atribuição específica herdam esta caixa
+  defaultLogisticsUnitId String?
+  defaultLogisticsUnit   LogisticsUnit? @relation(fields: [defaultLogisticsUnitId], references: [id])
+
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -96,6 +170,7 @@ model Producer {
 
   @@index([workspaceId])
   @@index([workspaceId, name])
+  @@index([defaultLogisticsUnitId])
 }
 
 // ==================== TIPOS DE CULTURA ====================
@@ -145,6 +220,11 @@ model Field {
   workspaceId String?
   workspace   Workspace? @relation(fields: [workspaceId], references: [id])
 
+  // Caixa logística atribuída (opcional)
+  // Se null, herda do produtor ou é calculada automaticamente
+  logisticsUnitId String?
+  logisticsUnit   LogisticsUnit? @relation(fields: [logisticsUnitId], references: [id])
+
   // Audit
   createdById String?
   createdBy   User?   @relation("CreatedBy", fields: [createdById], references: [id])
@@ -153,10 +233,12 @@ model Field {
   agroData AgroData?
   analyses Analysis[]
   ndviData NdviDataPoint[]
+  logisticsDistances FieldLogisticsDistance[]
 
   @@index([workspaceId])
   @@index([workspaceId, status])
   @@index([producerId])
+  @@index([logisticsUnitId])
 }
 
 // ==================== DADOS AGRONÔMICOS (BASE) ====================

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Upload, ArrowLeft, Loader2, AlertCircle, CheckCircle, Map, FileUp, UserCheck, Wheat } from 'lucide-react'
+import { Upload, ArrowLeft, Loader2, AlertCircle, CheckCircle, Map, FileUp, UserCheck, Wheat, Warehouse } from 'lucide-react'
 
 // Dynamic import do MapDrawer (client-only por causa do Leaflet)
 const MapDrawer = dynamic(
@@ -37,6 +37,11 @@ interface Producer {
   cpf: string | null
 }
 
+interface LogisticsUnit {
+  id: string
+  name: string
+}
+
 type CropType = 'SOJA' | 'MILHO'
 
 export default function NewFieldPage() {
@@ -60,22 +65,35 @@ export default function NewFieldPage() {
   const [producers, setProducers] = useState<Producer[]>([])
   const [loadingProducers, setLoadingProducers] = useState(true)
   
-  // Carregar produtores ao montar
+  // Caixas logísticas disponíveis
+  const [logisticsUnits, setLogisticsUnits] = useState<LogisticsUnit[]>([])
+  const [logisticsUnitId, setLogisticsUnitId] = useState<string>('')
+  
+  // Carregar produtores e caixas logísticas ao montar
   useEffect(() => {
-    async function fetchProducers() {
+    async function fetchData() {
       try {
-        const res = await fetch('/api/producers')
-        if (res.ok) {
-          const data = await res.json()
+        const [prodRes, unitsRes] = await Promise.all([
+          fetch('/api/producers'),
+          fetch('/api/logistics-units')
+        ])
+        
+        if (prodRes.ok) {
+          const data = await prodRes.json()
           setProducers(data.producers || [])
         }
+        
+        if (unitsRes.ok) {
+          const data = await unitsRes.json()
+          setLogisticsUnits(data.logisticsUnits || [])
+        }
       } catch (err) {
-        console.error('Erro ao carregar produtores:', err)
+        console.error('Erro ao carregar dados:', err)
       } finally {
         setLoadingProducers(false)
       }
     }
-    fetchProducers()
+    fetchData()
   }, [])
   
   // Upload state
@@ -201,6 +219,7 @@ export default function NewFieldPage() {
         geometryJson: currentGeometry,
         producerId: producerId || null,
         plantingDateInput: plantingDateInput || null,
+        logisticsUnitId: logisticsUnitId || null,
       }
 
       // Create field
@@ -310,6 +329,26 @@ export default function NewFieldPage() {
               value={date}
               onChange={e => setDate(e.target.value)}
             />
+          </div>
+          
+          <div className="flex flex-col gap-2">
+            <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1 flex items-center gap-1">
+              <Warehouse size={12} />
+              Caixa Logística
+              <span className="text-slate-300 normal-case font-normal">(opcional)</span>
+            </label>
+            <select
+              value={logisticsUnitId}
+              onChange={e => setLogisticsUnitId(e.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <option value="">Automático (por raio ou produtor)</option>
+              {logisticsUnits.map(u => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </select>
           </div>
           
           <div className="flex flex-col gap-2 md:col-span-2">

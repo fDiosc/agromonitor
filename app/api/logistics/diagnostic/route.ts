@@ -13,9 +13,11 @@ interface FieldWithData {
   longitude: number | null
   status: string
   producerId: string | null
+  logisticsUnitId: string | null
   producer: {
     id: string
     name: string
+    defaultLogisticsUnitId: string | null
   } | null
   agroData: {
     volumeEstimatedKg: number | null
@@ -170,6 +172,12 @@ export async function GET(request: NextRequest) {
 
     const searchParams = request.nextUrl.searchParams
     const seasonYear = searchParams.get('seasonYear')
+    const logisticsUnitIds = searchParams.get('logisticsUnitIds')
+    
+    // Parse logistics unit IDs if provided
+    const unitIdFilter = logisticsUnitIds 
+      ? logisticsUnitIds.split(',').filter(id => id.trim()) 
+      : null
     
     // Fetch all fields with processed data (only SUCCESS, not PARTIAL or ERROR)
     // Filtered by workspace
@@ -185,7 +193,8 @@ export async function GET(request: NextRequest) {
         producer: {
           select: {
             id: true,
-            name: true
+            name: true,
+            defaultLogisticsUnitId: true
           }
         },
         agroData: {
@@ -198,12 +207,47 @@ export async function GET(request: NextRequest) {
             confidenceScore: true,
             yieldEstimateKgHa: true
           }
+        },
+        logisticsDistances: {
+          where: {
+            isWithinCoverage: true
+          },
+          orderBy: {
+            distanceKm: 'asc'
+          },
+          take: 1, // Apenas a mais próxima
+          select: {
+            logisticsUnitId: true
+          }
         }
       }
-    }) as FieldWithData[]
+    }) as (FieldWithData & { logisticsDistances: { logisticsUnitId: string }[] })[]
     
     // Filtrar apenas talhões com eosDate válido (não pode fazer no where do Prisma)
-    const fields = fieldsRaw.filter(f => f.agroData?.eosDate !== null)
+    let fields = fieldsRaw.filter(f => f.agroData?.eosDate !== null)
+    
+    // Apply logistics unit filter if provided (usando dados persistidos)
+    if (unitIdFilter && unitIdFilter.length > 0) {
+      fields = fields.filter(field => {
+        // 1. Check direct assignment
+        if (field.logisticsUnitId && unitIdFilter.includes(field.logisticsUnitId)) {
+          return true
+        }
+        
+        // 2. Check inherited from producer
+        if (field.producer?.defaultLogisticsUnitId && unitIdFilter.includes(field.producer.defaultLogisticsUnitId)) {
+          return true
+        }
+        
+        // 3. Check automatic (using persisted distances)
+        const nearestUnit = (field as (FieldWithData & { logisticsDistances: { logisticsUnitId: string }[] })).logisticsDistances?.[0]
+        if (nearestUnit && unitIdFilter.includes(nearestUnit.logisticsUnitId)) {
+          return true
+        }
+        
+        return false
+      })
+    }
     
     const today = new Date()
     

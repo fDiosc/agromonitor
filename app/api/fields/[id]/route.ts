@@ -3,6 +3,7 @@ import prisma from '@/lib/prisma'
 import { analyzeCycles, prepareHistoricalOverlayData } from '@/lib/services/cycle-analysis.service'
 import { calculateHistoricalCorrelation, getCorrelationDiagnosis } from '@/lib/services/correlation.service'
 import { getSession, unauthorizedResponse } from '@/lib/auth'
+import { processFieldDistances } from '@/lib/services/logistics-distance.service'
 import type { NdviPoint } from '@/lib/services/merx.service'
 
 interface RouteParams {
@@ -220,6 +221,99 @@ export async function DELETE(
     console.error('Error deleting field:', error)
     return NextResponse.json(
       { error: 'Failed to delete field' },
+      { status: 500 }
+    )
+  }
+}
+
+/**
+ * PATCH /api/fields/[id]
+ * Atualiza campos específicos de um talhão (ex: caixa logística)
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: RouteParams
+) {
+  try {
+    const session = await getSession()
+    if (!session) {
+      return unauthorizedResponse()
+    }
+
+    // Verificar permissão
+    if (session.role === 'VIEWER') {
+      return NextResponse.json(
+        { error: 'Sem permissão para atualizar talhões' },
+        { status: 403 }
+      )
+    }
+
+    const body = await request.json()
+    const { logisticsUnitId } = body
+
+    // Verificar se o talhão existe e pertence ao workspace
+    const existingField = await prisma.field.findFirst({
+      where: {
+        id: params.id,
+        workspaceId: session.workspaceId
+      }
+    })
+
+    if (!existingField) {
+      return NextResponse.json(
+        { error: 'Talhão não encontrado' },
+        { status: 404 }
+      )
+    }
+
+    // Se logisticsUnitId foi fornecido, validar que pertence ao workspace
+    if (logisticsUnitId) {
+      const unit = await prisma.logisticsUnit.findFirst({
+        where: {
+          id: logisticsUnitId,
+          workspaceId: session.workspaceId,
+          isActive: true
+        }
+      })
+
+      if (!unit) {
+        return NextResponse.json(
+          { error: 'Caixa logística não encontrada' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Atualizar talhão
+    const updatedField = await prisma.field.update({
+      where: { id: params.id },
+      data: {
+        ...(logisticsUnitId !== undefined && { 
+          logisticsUnitId: logisticsUnitId || null 
+        })
+      },
+      include: {
+        logisticsUnit: {
+          select: { id: true, name: true }
+        }
+      }
+    })
+
+    // Reprocessar distâncias se necessário
+    if (existingField.latitude && existingField.longitude) {
+      processFieldDistances(params.id).catch(err => {
+        console.error('Erro ao reprocessar distâncias:', err)
+      })
+    }
+
+    return NextResponse.json({ 
+      success: true, 
+      field: updatedField 
+    })
+  } catch (error) {
+    console.error('Error updating field:', error)
+    return NextResponse.json(
+      { error: 'Failed to update field' },
       { status: 500 }
     )
   }

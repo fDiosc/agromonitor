@@ -1,9 +1,8 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { MapPin, Maximize2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { MapPin, Warehouse } from 'lucide-react'
 import dynamic from 'next/dynamic'
 
 interface Field {
@@ -22,8 +21,19 @@ interface Field {
   daysToHarvest: number
 }
 
+interface LogisticsUnit {
+  id: string
+  name: string
+  latitude: number | null
+  longitude: number | null
+  coverageRadiusKm: number | null
+  city?: string
+  state?: string
+}
+
 interface PropertiesMapProps {
   fields: Field[]
+  logisticsUnits?: LogisticsUnit[]
 }
 
 const statusColors = {
@@ -56,12 +66,35 @@ const CircleMarker = dynamic(
   { ssr: false }
 )
 
+const Polygon = dynamic(
+  () => import('react-leaflet').then(mod => mod.Polygon),
+  { ssr: false }
+)
+
+const Circle = dynamic(
+  () => import('react-leaflet').then(mod => mod.Circle),
+  { ssr: false }
+)
+
 const Popup = dynamic(
   () => import('react-leaflet').then(mod => mod.Popup),
   { ssr: false }
 )
 
-function MapContent({ fields }: { fields: Field[] }) {
+// Gera os pontos de um triângulo ao redor de um centro
+function getTrianglePoints(lat: number, lng: number, sizeKm: number = 5): [number, number][] {
+  // Converter km para graus (aproximado)
+  const latOffset = sizeKm / 111
+  const lngOffset = sizeKm / (111 * Math.cos(lat * Math.PI / 180))
+  
+  return [
+    [lat + latOffset, lng], // Topo
+    [lat - latOffset * 0.5, lng - lngOffset * 0.866], // Inferior esquerdo
+    [lat - latOffset * 0.5, lng + lngOffset * 0.866], // Inferior direito
+  ]
+}
+
+function MapContent({ fields, logisticsUnits = [] }: { fields: Field[]; logisticsUnits?: LogisticsUnit[] }) {
   const [isClient, setIsClient] = useState(false)
   
   useEffect(() => {
@@ -79,18 +112,23 @@ function MapContent({ fields }: { fields: Field[] }) {
 
   // Filter fields with valid coordinates
   const validFields = fields.filter(f => f.latitude !== 0 && f.longitude !== 0)
+  const validUnits = logisticsUnits.filter(u => u.latitude !== null && u.longitude !== null)
   
-  if (validFields.length === 0) {
+  if (validFields.length === 0 && validUnits.length === 0) {
     return (
       <div className="h-[400px] bg-slate-900/50 rounded-lg flex items-center justify-center">
-        <p className="text-slate-400">Nenhum talhão com coordenadas válidas</p>
+        <p className="text-slate-400">Nenhum talhão ou caixa logística com coordenadas válidas</p>
       </div>
     )
   }
 
-  // Calculate center
-  const centerLat = validFields.reduce((sum, f) => sum + f.latitude, 0) / validFields.length
-  const centerLng = validFields.reduce((sum, f) => sum + f.longitude, 0) / validFields.length
+  // Calculate center considering both fields and units
+  const allPoints = [
+    ...validFields.map(f => ({ lat: f.latitude, lng: f.longitude })),
+    ...validUnits.map(u => ({ lat: u.latitude!, lng: u.longitude! }))
+  ]
+  const centerLat = allPoints.reduce((sum, p) => sum + p.lat, 0) / allPoints.length
+  const centerLng = allPoints.reduce((sum, p) => sum + p.lng, 0) / allPoints.length
 
   return (
     <div className="h-[400px] rounded-lg overflow-hidden">
@@ -105,6 +143,61 @@ function MapContent({ fields }: { fields: Field[] }) {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         
+        {/* Círculos de cobertura das caixas logísticas */}
+        {validUnits.map((unit) => unit.coverageRadiusKm && (
+          <Circle
+            key={`coverage-${unit.id}`}
+            center={[unit.latitude!, unit.longitude!]}
+            radius={unit.coverageRadiusKm * 1000} // km para metros
+            pathOptions={{
+              color: '#f59e0b',
+              fillColor: '#f59e0b',
+              fillOpacity: 0.08,
+              weight: 1,
+              dashArray: '5, 5'
+            }}
+          />
+        ))}
+        
+        {/* Triângulos das caixas logísticas */}
+        {validUnits.map((unit) => (
+          <Polygon
+            key={`unit-${unit.id}`}
+            positions={getTrianglePoints(unit.latitude!, unit.longitude!, 8)}
+            pathOptions={{
+              color: '#f59e0b',
+              fillColor: '#f59e0b',
+              fillOpacity: 0.8,
+              weight: 2
+            }}
+          >
+            <Popup>
+              <div className="min-w-[200px]">
+                <h3 className="font-bold text-slate-900 mb-2 flex items-center gap-2">
+                  <span className="text-amber-500">▲</span>
+                  {unit.name}
+                </h3>
+                <div className="space-y-1 text-sm text-slate-700">
+                  {unit.city && unit.state && (
+                    <p>
+                      <span className="font-medium">Local:</span> {unit.city}, {unit.state}
+                    </p>
+                  )}
+                  {unit.coverageRadiusKm && (
+                    <p>
+                      <span className="font-medium">Raio de Cobertura:</span> {unit.coverageRadiusKm} km
+                    </p>
+                  )}
+                  <p className="text-xs text-slate-500 mt-2">
+                    Caixa Logística / Armazém
+                  </p>
+                </div>
+              </div>
+            </Popup>
+          </Polygon>
+        ))}
+        
+        {/* Círculos dos talhões */}
         {validFields.map((field) => (
           <CircleMarker
             key={field.id}
@@ -151,7 +244,7 @@ function MapContent({ fields }: { fields: Field[] }) {
   )
 }
 
-export function PropertiesMap({ fields }: PropertiesMapProps) {
+export function PropertiesMap({ fields, logisticsUnits = [] }: PropertiesMapProps) {
   return (
     <Card className="bg-slate-800/50 border-slate-700">
       <CardHeader>
@@ -163,7 +256,7 @@ export function PropertiesMap({ fields }: PropertiesMapProps) {
         </div>
       </CardHeader>
       <CardContent>
-        <MapContent fields={fields} />
+        <MapContent fields={fields} logisticsUnits={logisticsUnits} />
         
         {/* Legend */}
         <div className="flex flex-wrap items-center justify-center gap-6 mt-4 text-sm">
@@ -176,6 +269,15 @@ export function PropertiesMap({ fields }: PropertiesMapProps) {
               <span className="text-slate-400">{label}</span>
             </div>
           ))}
+          {/* Caixa Logística na legenda */}
+          {logisticsUnits && logisticsUnits.length > 0 && (
+            <div className="flex items-center gap-2">
+              <div 
+                className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-b-[10px] border-b-amber-500"
+              />
+              <span className="text-slate-400">Caixa Logística</span>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

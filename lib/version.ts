@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.0.14'
+export const APP_VERSION = '0.0.17'
 
 // Fases do produto
 export const VERSION_PHASES = {
@@ -25,6 +25,48 @@ export const CHANGELOG: ChangelogEntry[] = [
   // ==================== ALPHA (0.0.x) ====================
   // Changelog consolidado - apenas features finais implementadas
   
+  {
+    version: '0.0.17',
+    date: '2026-02-03',
+    title: 'Filtros e Gestão de Talhões',
+    type: 'improvement',
+    changes: [
+      'Expandir produtor para ver talhões vinculados (área, volume, status)',
+      'Cards clicáveis como filtros na tela Gerenciar Talhões',
+      'Filtros no Dashboard: status, caixa logística e tipo de atribuição',
+      'Badges de atribuição compactas: M (Manual), P (Produtor), A (Auto)',
+      'Filtro de caixas logísticas respeita atribuições manuais',
+      'Correção de glitch visual na sidebar (seleção duplicada)',
+      'Tabela de cobertura com layout otimizado e tooltips',
+    ],
+  },
+  {
+    version: '0.0.16',
+    date: '2026-02-03',
+    title: 'Distâncias Persistentes e UX Simplificada',
+    type: 'improvement',
+    changes: [
+      'Distâncias talhão-caixa logística calculadas e persistidas no banco',
+      'Processamento automático ao criar caixa logística ou talhão',
+      'Botão de reprocessamento manual nas configurações',
+      'Seletor de caixas logísticas integrado no Overview do diagnóstico',
+      'Removida aba "Unidade de Recebimento" redundante',
+      'Performance melhorada (leitura do banco vs cálculo on-demand)',
+    ],
+  },
+  {
+    version: '0.0.15',
+    date: '2026-02-03',
+    title: 'Caixas Logísticas',
+    type: 'feature',
+    changes: [
+      'Cadastro de caixas logísticas (armazéns) com lat/lng e raio de cobertura',
+      'Aba "Unidade de Recebimento" no diagnóstico logístico',
+      'Atribuição automática de talhões por raio de cobertura',
+      'Atribuição manual em nível de produtor ou talhão',
+      'Configurações de workspace (método de cálculo de distância)',
+    ],
+  },
   {
     version: '0.0.14',
     date: '2026-01-30',

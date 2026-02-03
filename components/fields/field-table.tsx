@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Eye, Trash2, Loader2, CheckCircle, AlertCircle, Clock, RefreshCw, AlertTriangle } from 'lucide-react'
+import { Eye, Trash2, Loader2, CheckCircle, AlertCircle, Clock, RefreshCw, AlertTriangle, Warehouse, AlertOctagon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatNumber, formatTons } from '@/lib/utils'
@@ -24,6 +24,19 @@ interface Field {
     templateId: string
     status: string
     statusColor: string | null
+  }[]
+  // Caixas logísticas
+  logisticsUnit?: { id: string; name: string } | null
+  producer?: { 
+    id?: string
+    name?: string
+    defaultLogisticsUnit?: { id: string; name: string } | null 
+  } | null
+  logisticsDistances?: {
+    logisticsUnitId: string
+    distanceKm: number
+    isWithinCoverage: boolean
+    logisticsUnit: { id: string; name: string }
   }[]
 }
 
@@ -107,6 +120,9 @@ export function FieldTable({ fields, onDelete, onReprocess, isDeleting, isReproc
               Vol. Est.
             </th>
             <th className="px-6 py-5 text-[10px] font-black uppercase tracking-widest text-slate-400">
+              Caixa Logística
+            </th>
+            <th className="px-6 py-5 text-[10px] font-black uppercase tracking-widest text-slate-400">
               Análises
             </th>
             <th className="px-6 py-5 text-right text-[10px] font-black uppercase tracking-widest text-slate-400">
@@ -155,6 +171,51 @@ export function FieldTable({ fields, onDelete, onReprocess, isDeleting, isReproc
                   ) : (
                     '---'
                   )}
+                </td>
+                <td className="px-6 py-4">
+                  {(() => {
+                    // Determinar caixa principal e interseções
+                    const directUnit = field.logisticsUnit
+                    const inheritedUnit = field.producer?.defaultLogisticsUnit
+                    const coveringUnits = field.logisticsDistances || []
+                    
+                    // Obter nomes das unidades de cobertura
+                    const coveringNames = coveringUnits.map(d => d.logisticsUnit)
+                    
+                    const primaryUnit = directUnit || inheritedUnit || (coveringNames.length > 0 ? coveringNames[0] : null)
+                    const hasIntersection = coveringUnits.length > 1
+                    
+                    if (!primaryUnit && coveringUnits.length === 0) {
+                      return <span className="text-slate-300 text-xs">—</span>
+                    }
+                    
+                    // Determinar tipo de atribuição
+                    const assignType = directUnit ? 'M' : (inheritedUnit ? 'P' : 'A')
+                    const assignColor = directUnit ? 'bg-blue-500' : (inheritedUnit ? 'bg-purple-500' : 'bg-green-500')
+                    const assignTitle = directUnit ? 'Manual' : (inheritedUnit ? 'Produtor' : 'Automático')
+                    
+                    return (
+                      <div className="flex items-center gap-1.5">
+                        <span 
+                          className={`w-4 h-4 flex items-center justify-center text-[8px] font-bold text-white rounded ${assignColor}`}
+                          title={assignTitle}
+                        >
+                          {assignType}
+                        </span>
+                        <span className="text-xs text-slate-700 truncate max-w-[90px]" title={primaryUnit?.name}>
+                          {primaryUnit?.name}
+                        </span>
+                        {hasIntersection && (
+                          <span 
+                            className="flex items-center text-amber-500 cursor-help"
+                            title={`Interseção: ${coveringNames.map(u => u.name).join(', ')}`}
+                          >
+                            <AlertOctagon size={12} />
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex gap-1 flex-wrap">

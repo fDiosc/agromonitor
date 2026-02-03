@@ -3,6 +3,7 @@ import prisma from '@/lib/prisma'
 import { validateGeometry } from '@/lib/services/geometry.service'
 import { reverseGeocode } from '@/lib/services/geocoding.service'
 import { getSession, unauthorizedResponse } from '@/lib/auth'
+import { processFieldDistances } from '@/lib/services/logistics-distance.service'
 import { z } from 'zod'
 
 // Schema de validação
@@ -13,21 +14,30 @@ const createFieldSchema = z.object({
   geometryJson: z.string().min(1, 'Geometria é obrigatória'),
   producerId: z.string().nullable().optional(),
   plantingDateInput: z.string().nullable().optional(), // Data de plantio informada pelo produtor
+  logisticsUnitId: z.string().nullable().optional(), // Caixa logística atribuída
 })
 
 /**
  * GET /api/fields
  * Lista todos os talhões do workspace
+ * Query params:
+ * - producerId: filtrar por produtor
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await getSession()
     if (!session) {
       return unauthorizedResponse()
     }
 
+    const { searchParams } = new URL(request.url)
+    const producerId = searchParams.get('producerId')
+
     const fields = await prisma.field.findMany({
-      where: { workspaceId: session.workspaceId },
+      where: { 
+        workspaceId: session.workspaceId,
+        ...(producerId && { producerId })
+      },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -43,6 +53,37 @@ export async function GET() {
           select: {
             id: true,
             name: true,
+            defaultLogisticsUnit: {
+              select: {
+                id: true,
+                name: true
+              }
+            }
+          }
+        },
+        logisticsUnit: {
+          select: {
+            id: true,
+            name: true
+          }
+        },
+        logisticsDistances: {
+          where: {
+            isWithinCoverage: true
+          },
+          select: {
+            logisticsUnitId: true,
+            distanceKm: true,
+            isWithinCoverage: true,
+            logisticsUnit: {
+              select: {
+                id: true,
+                name: true
+              }
+            }
+          },
+          orderBy: {
+            distanceKm: 'asc'
           }
         },
         createdAt: true,
@@ -147,7 +188,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { name, cropType, seasonStartDate, geometryJson, producerId, plantingDateInput } = parsed.data
+    const { name, cropType, seasonStartDate, geometryJson, producerId, plantingDateInput, logisticsUnitId } = parsed.data
 
     // Validar geometria
     const validation = validateGeometry(geometryJson, 'geometry.geojson')
@@ -169,6 +210,22 @@ export async function POST(request: NextRequest) {
       if (!producer) {
         return NextResponse.json(
           { error: 'Produtor não encontrado' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Verificar se caixa logística existe e pertence ao workspace (se informada)
+    if (logisticsUnitId) {
+      const unit = await prisma.logisticsUnit.findFirst({
+        where: {
+          id: logisticsUnitId,
+          workspaceId: session.workspaceId,
+        },
+      })
+      if (!unit) {
+        return NextResponse.json(
+          { error: 'Caixa logística não encontrada' },
           { status: 400 }
         )
       }
@@ -197,8 +254,16 @@ export async function POST(request: NextRequest) {
         createdById: session.userId,
         producerId: producerId || null,
         plantingDateInput: plantingDateInput ? new Date(plantingDateInput) : null,
+        logisticsUnitId: logisticsUnitId || null,
       }
     })
+
+    // Processar distâncias para caixas logísticas
+    if (field.latitude && field.longitude) {
+      processFieldDistances(field.id).catch(err => {
+        console.error('Erro ao processar distâncias do talhão:', err)
+      })
+    }
 
     return NextResponse.json({ field }, { status: 201 })
   } catch (error) {

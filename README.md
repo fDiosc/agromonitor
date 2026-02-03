@@ -16,6 +16,8 @@ O **MERX AGRO Monitor** é uma plataforma multi-tenant que transforma dados de s
 - **Detecção de Fenologia** - Identificação automática de plantio, emergência e colheita
 - **Curvas NDVI** - Visualização histórica e projeções com correlação
 - **Diagnóstico Logístico** - Visão consolidada para planejamento de recebimento
+- **Caixas Logísticas** - Gestão de armazéns com raio de cobertura
+- **Filtros Avançados** - Por status, caixa logística e tipo de atribuição
 - **Templates de Análise** - Crédito, Logística, Matriz de Risco
 
 ---
@@ -103,13 +105,17 @@ merx-agro-mvp/
 ├── app/
 │   ├── (authenticated)/        # Rotas protegidas (requer login)
 │   │   ├── layout.tsx          # Layout com Sidebar
-│   │   ├── page.tsx            # Dashboard principal
+│   │   ├── page.tsx            # Dashboard principal (Carteira)
 │   │   ├── admin/
 │   │   │   ├── users/          # Gestão de usuários
 │   │   │   └── workspaces/     # Gestão de workspaces (SUPER_ADMIN)
 │   │   ├── producers/          # Gestão de produtores
-│   │   ├── dashboard/logistics/# Diagnóstico logístico
+│   │   ├── fields/             # Gerenciar Talhões (atribuições)
+│   │   ├── dashboard/
+│   │   │   ├── logistics/      # Diagnóstico logístico
+│   │   │   └── logistics-units/# Gestão de Caixas Logísticas
 │   │   ├── fields/new/         # Cadastro de talhões
+│   │   ├── settings/           # Configurações do workspace
 │   │   └── reports/[id]/       # Relatórios detalhados
 │   ├── login/                  # Página de login
 │   ├── change-password/        # Troca de senha (primeiro acesso)
@@ -121,6 +127,8 @@ merx-agro-mvp/
 │       ├── producers/          # CRUD de produtores
 │       ├── fields/             # CRUD de talhões
 │       ├── logistics/          # Diagnóstico logístico
+│       ├── logistics-units/    # Caixas logísticas e cobertura
+│       ├── workspace/          # Configurações do workspace
 │       └── templates/          # Templates de análise
 ├── components/
 │   ├── layout/                 # Sidebar, AppLayout, Changelog
@@ -132,6 +140,8 @@ merx-agro-mvp/
 │   ├── version.ts              # Versão e changelog
 │   ├── prisma.ts               # Cliente Prisma
 │   └── services/               # Serviços de negócio
+│       ├── distance.service.ts # Cálculo de distâncias
+│       └── logistics-distance.service.ts # Persistência de distâncias
 ├── prisma/
 │   ├── schema.prisma           # Schema do banco
 │   └── seed.ts                 # Seed inicial
@@ -253,10 +263,31 @@ Visão consolidada para planejamento:
 - Métricas agregadas (área, volume, carretas)
 - Curva de recebimento (bell curve)
 - Cronograma por talhão
-- Mapa de propriedades
+- Mapa de propriedades com caixas logísticas
 - Indicadores críticos
+- Filtro por uma ou mais caixas logísticas
 
-### 4. Templates de Análise
+### 4. Caixas Logísticas
+
+Gestão de unidades de recebimento:
+- Cadastro com coordenadas e raio de cobertura
+- Visualização de cobertura e interseções
+- Atribuição de talhões (manual, herdada, automática)
+- Hierarquia: Manual > Produtor > Automático (mais próximo)
+
+### 5. Filtros e Gestão
+
+Dashboard com filtros avançados:
+- Status: Todos, Processado, Processando, Pendente, Erro
+- Caixa Logística: Todas, Sem atribuição, ou específica
+- Tipo de Atribuição: Manual (M), Produtor (P), Automático (A)
+
+Gerenciamento de talhões:
+- Cards clicáveis como filtros
+- Resolução de interseções (talhões em múltiplos raios)
+- Atribuição manual de caixa logística
+
+### 6. Templates de Análise
 
 Sistema extensível de análises:
 - **Crédito**: Avaliação de garantias e CPRs
@@ -314,6 +345,18 @@ Sistema extensível de análises:
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
 | GET | `/api/logistics/diagnostic` | Dados agregados (do workspace) |
+
+### Caixas Logísticas
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| GET | `/api/logistics-units` | Listar caixas logísticas |
+| POST | `/api/logistics-units` | Criar caixa logística |
+| GET | `/api/logistics-units/[id]` | Detalhes da caixa |
+| PUT | `/api/logistics-units/[id]` | Atualizar caixa |
+| DELETE | `/api/logistics-units/[id]` | Excluir/desativar caixa |
+| GET | `/api/logistics-units/coverage` | Relatório de cobertura |
+| POST | `/api/logistics-units/reprocess` | Reprocessar distâncias |
 
 ### Admin - Usuários (ADMIN/SUPER_ADMIN)
 

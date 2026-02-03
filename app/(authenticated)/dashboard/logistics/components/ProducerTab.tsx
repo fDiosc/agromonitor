@@ -3,12 +3,14 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Check, X, Users, Filter, Wheat } from 'lucide-react'
+import { Check, Users, Filter, Wheat, ChevronDown, ChevronUp, MapPin, Calendar, Truck, TrendingUp } from 'lucide-react'
 import { SummaryCards } from './SummaryCards'
 import { HarvestTimeline } from './HarvestTimeline'
 import { ReceiptCurve } from './ReceiptCurve'
 import { FieldsSchedule } from './FieldsSchedule'
 import { PropertiesMap } from './PropertiesMap'
+import { format, parseISO } from 'date-fns'
+import { ptBR } from 'date-fns/locale'
 
 interface Producer {
   id: string
@@ -71,6 +73,7 @@ export function ProducerTab({ data }: ProducerTabProps) {
   const [producers, setProducers] = useState<Producer[]>([])
   const [selectedProducerIds, setSelectedProducerIds] = useState<Set<string>>(new Set())
   const [loadingProducers, setLoadingProducers] = useState(true)
+  const [expandedProducerId, setExpandedProducerId] = useState<string | null>(null)
 
   useEffect(() => {
     async function fetchProducers() {
@@ -186,14 +189,15 @@ export function ProducerTab({ data }: ProducerTabProps) {
 
   // Produtores com talhões no diagnóstico
   const producersWithFields = useMemo(() => {
-    const producerFieldCounts = new Map<string, { count: number; area: number }>()
+    const producerFieldCounts = new Map<string, { count: number; area: number; volumeKg: number }>()
     
     data.fields.forEach(field => {
       if (field.producerId) {
-        const current = producerFieldCounts.get(field.producerId) || { count: 0, area: 0 }
+        const current = producerFieldCounts.get(field.producerId) || { count: 0, area: 0, volumeKg: 0 }
         producerFieldCounts.set(field.producerId, {
           count: current.count + 1,
           area: current.area + (field.areaHa || 0),
+          volumeKg: current.volumeKg + (field.volumeKg || 0),
         })
       }
     })
@@ -204,8 +208,19 @@ export function ProducerTab({ data }: ProducerTabProps) {
         ...p,
         fieldCount: producerFieldCounts.get(p.id)?.count || 0,
         totalAreaHa: producerFieldCounts.get(p.id)?.area || 0,
+        totalVolumeKg: producerFieldCounts.get(p.id)?.volumeKg || 0,
       }))
   }, [producers, data.fields])
+
+  // Talhões do produtor expandido
+  const expandedProducerFields = useMemo(() => {
+    if (!expandedProducerId) return []
+    return data.fields.filter(f => f.producerId === expandedProducerId)
+  }, [data.fields, expandedProducerId])
+
+  const toggleExpand = (id: string) => {
+    setExpandedProducerId(prev => prev === id ? null : id)
+  }
 
   return (
     <div className="space-y-6">
@@ -251,34 +266,111 @@ export function ProducerTab({ data }: ProducerTabProps) {
               </p>
             </div>
           ) : (
-            <div className="flex flex-wrap gap-2">
+            <div className="space-y-2">
               {producersWithFields.map(producer => {
                 const isSelected = selectedProducerIds.has(producer.id)
+                const isExpanded = expandedProducerId === producer.id
                 return (
-                  <button
-                    key={producer.id}
-                    onClick={() => toggleProducer(producer.id)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
-                      isSelected
-                        ? 'bg-blue-600 border-blue-500 text-white'
-                        : 'bg-slate-700/50 border-slate-600 text-slate-300 hover:border-slate-500'
-                    }`}
-                  >
-                    <div className={`w-4 h-4 rounded flex items-center justify-center ${
-                      isSelected ? 'bg-white/20' : 'bg-slate-600'
-                    }`}>
-                      {isSelected && <Check className="w-3 h-3" />}
+                  <div key={producer.id} className="rounded-lg border border-slate-600 overflow-hidden">
+                    <div className="flex items-center">
+                      {/* Checkbox para filtro */}
+                      <button
+                        onClick={() => toggleProducer(producer.id)}
+                        className={`flex items-center justify-center w-10 h-full py-3 ${
+                          isSelected ? 'bg-blue-600' : 'bg-slate-700/50 hover:bg-slate-600'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded flex items-center justify-center ${
+                          isSelected ? 'bg-white/20' : 'bg-slate-600'
+                        }`}>
+                          {isSelected && <Check className="w-3 h-3 text-white" />}
+                        </div>
+                      </button>
+                      
+                      {/* Info do produtor (clicável para expandir) */}
+                      <button
+                        onClick={() => toggleExpand(producer.id)}
+                        className={`flex-1 flex items-center justify-between px-4 py-3 transition-colors ${
+                          isExpanded ? 'bg-slate-700' : 'bg-slate-700/50 hover:bg-slate-700/80'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="font-medium text-white">{producer.name}</span>
+                          <span className="text-xs px-2 py-0.5 rounded bg-slate-600 text-slate-300">
+                            {producer.fieldCount} talhões
+                          </span>
+                          <span className="text-xs text-slate-400">
+                            {producer.totalAreaHa.toFixed(0)} ha
+                          </span>
+                          <span className="text-xs text-emerald-400">
+                            {(producer.totalVolumeKg / 1000).toFixed(0)} ton
+                          </span>
+                        </div>
+                        {isExpanded ? (
+                          <ChevronUp className="w-4 h-4 text-slate-400" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-slate-400" />
+                        )}
+                      </button>
                     </div>
-                    <span className="font-medium">{producer.name}</span>
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                      isSelected ? 'bg-white/20' : 'bg-slate-600'
-                    }`}>
-                      {producer.fieldCount} talhões
-                    </span>
-                    <span className={`text-xs ${isSelected ? 'text-blue-200' : 'text-slate-400'}`}>
-                      {producer.totalAreaHa.toFixed(0)} ha
-                    </span>
-                  </button>
+                    
+                    {/* Lista de talhões expandida */}
+                    {isExpanded && (
+                      <div className="bg-slate-800/50 border-t border-slate-600 p-4">
+                        <div className="text-xs text-slate-400 uppercase tracking-wider mb-3">
+                          Talhões de {producer.name}
+                        </div>
+                        <div className="grid gap-2">
+                          {expandedProducerFields.map(field => (
+                            <div 
+                              key={field.id}
+                              className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg"
+                            >
+                              <div className="flex items-center gap-4">
+                                <div>
+                                  <div className="font-medium text-white">{field.name}</div>
+                                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                                    <MapPin className="w-3 h-3" />
+                                    {field.city}, {field.state}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-6 text-sm">
+                                <div className="text-right">
+                                  <div className="text-slate-400 text-xs">Área</div>
+                                  <div className="text-white font-medium">{field.areaHa.toLocaleString('pt-BR')} ha</div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-slate-400 text-xs">Volume</div>
+                                  <div className="text-emerald-400 font-medium">{(field.volumeKg / 1000).toFixed(0)} ton</div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-slate-400 text-xs">Colheita</div>
+                                  <div className="flex items-center gap-1 text-blue-400 font-medium">
+                                    <Calendar className="w-3 h-3" />
+                                    {field.harvestStart ? format(parseISO(field.harvestStart), 'dd/MM', { locale: ptBR }) : '—'}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-slate-400 text-xs">Status</div>
+                                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                    field.status === 'harvesting' ? 'bg-green-500/20 text-green-400' :
+                                    field.status === 'upcoming' ? 'bg-amber-500/20 text-amber-400' :
+                                    field.status === 'attention' ? 'bg-red-500/20 text-red-400' :
+                                    'bg-slate-600 text-slate-300'
+                                  }`}>
+                                    {field.status === 'harvesting' ? 'Colhendo' :
+                                     field.status === 'upcoming' ? 'Próximo' :
+                                     field.status === 'attention' ? 'Atenção' : 'Aguardando'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )
               })}
             </div>

@@ -60,7 +60,10 @@ function parsePeriod(periodo: string): { start: Date; end: Date } | null {
  * - Set-Dez: início da nova janela (ZARC > 0)
  */
 export function parseZarcWindow(zarcData: any[]): ZarcWindow | null {
-  if (!zarcData || zarcData.length === 0) return null
+  // Validação robusta - garantir que é um array
+  if (!zarcData || !Array.isArray(zarcData) || zarcData.length === 0) {
+    return null
+  }
   
   // Converter para estrutura tipada
   const periods: ZarcPeriod[] = []
@@ -164,7 +167,10 @@ export function parseZarcWindow(zarcData: any[]): ZarcWindow | null {
  * Retorna o nível de risco ZARC para uma data específica
  */
 export function getPlantingRisk(zarcData: any[], plantingDate: Date): number {
-  if (!zarcData || zarcData.length === 0) return -1 // -1 = desconhecido
+  // Validação robusta - garantir que é um array
+  if (!zarcData || !Array.isArray(zarcData) || zarcData.length === 0) {
+    return -1 // -1 = desconhecido
+  }
   
   for (const z of zarcData) {
     const parsed = parsePeriod(z.periodo)
@@ -194,7 +200,8 @@ export function analyzeZarc(
     daysToWindowEnd: null
   }
   
-  if (!zarcData) return result
+  // Validação robusta - garantir que é um array
+  if (!zarcData || !Array.isArray(zarcData)) return result
   
   // Extrair janela
   const window = parseZarcWindow(zarcData)

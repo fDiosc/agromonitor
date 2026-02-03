@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import Link from 'next/link'
 import {
   Users,
   Plus,
@@ -14,14 +15,40 @@ import {
   Trash2,
   X,
   Map,
-  AlertCircle
+  AlertCircle,
+  Warehouse,
+  ChevronDown,
+  ChevronUp,
+  MapPin,
+  Calendar,
+  Eye
 } from 'lucide-react'
+
+interface LogisticsUnit {
+  id: string
+  name: string
+}
+
+interface Field {
+  id: string
+  name: string
+  city: string | null
+  state: string | null
+  areaHa: number | null
+  status: string
+  agroData?: {
+    volumeEstimatedKg: number | null
+    eosDate: string | null
+  } | null
+}
 
 interface Producer {
   id: string
   name: string
   cpf: string | null
   createdAt: string
+  defaultLogisticsUnitId: string | null
+  defaultLogisticsUnit: LogisticsUnit | null
   _count: {
     fields: number
   }
@@ -46,6 +73,15 @@ export default function ProducersPage() {
   // Form state
   const [formName, setFormName] = useState('')
   const [formCpf, setFormCpf] = useState('')
+  const [formLogisticsUnitId, setFormLogisticsUnitId] = useState('')
+  
+  // Logistics units
+  const [logisticsUnits, setLogisticsUnits] = useState<LogisticsUnit[]>([])
+
+  // Expanded producer
+  const [expandedProducerId, setExpandedProducerId] = useState<string | null>(null)
+  const [producerFields, setProducerFields] = useState<Field[]>([])
+  const [loadingFields, setLoadingFields] = useState(false)
 
   const fetchProducers = async () => {
     try {
@@ -60,14 +96,53 @@ export default function ProducersPage() {
     }
   }
 
+  const fetchLogisticsUnits = async () => {
+    try {
+      const res = await fetch('/api/logistics-units')
+      if (res.ok) {
+        const data = await res.json()
+        setLogisticsUnits(data.logisticsUnits || [])
+      }
+    } catch (err) {
+      console.error('Error fetching logistics units:', err)
+    }
+  }
+
   useEffect(() => {
     fetchProducers()
+    fetchLogisticsUnits()
   }, [])
+
+  const fetchProducerFields = useCallback(async (producerId: string) => {
+    setLoadingFields(true)
+    try {
+      const res = await fetch(`/api/fields?producerId=${producerId}`)
+      if (res.ok) {
+        const data = await res.json()
+        setProducerFields(data.fields || [])
+      }
+    } catch (err) {
+      console.error('Error fetching producer fields:', err)
+    } finally {
+      setLoadingFields(false)
+    }
+  }, [])
+
+  const toggleExpand = (producerId: string) => {
+    if (expandedProducerId === producerId) {
+      setExpandedProducerId(null)
+      setProducerFields([])
+    } else {
+      setExpandedProducerId(producerId)
+      fetchProducerFields(producerId)
+    }
+  }
 
   const openCreateModal = () => {
     setEditingProducer(null)
     setFormName('')
     setFormCpf('')
+    setFormLogisticsUnitId('')
     setShowModal(true)
   }
 
@@ -75,6 +150,7 @@ export default function ProducersPage() {
     setEditingProducer(producer)
     setFormName(producer.name)
     setFormCpf(producer.cpf || '')
+    setFormLogisticsUnitId(producer.defaultLogisticsUnitId || '')
     setShowModal(true)
   }
 
@@ -96,6 +172,7 @@ export default function ProducersPage() {
         body: JSON.stringify({
           name: formName,
           cpf: formCpf || null,
+          defaultLogisticsUnitId: formLogisticsUnitId || null,
         }),
       })
 
@@ -213,52 +290,137 @@ export default function ProducersPage() {
         </Card>
       ) : (
         <div className="grid gap-4">
-          {filteredProducers.map((producer) => (
-            <Card key={producer.id} className="hover:shadow-md transition-shadow">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center">
-                      <span className="text-xl font-bold text-emerald-600">
-                        {producer.name.charAt(0).toUpperCase()}
-                      </span>
+          {filteredProducers.map((producer) => {
+            const isExpanded = expandedProducerId === producer.id
+            return (
+              <Card key={producer.id} className="hover:shadow-md transition-shadow overflow-hidden">
+                <CardContent className="p-0">
+                  <div 
+                    className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-50"
+                    onClick={() => toggleExpand(producer.id)}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center">
+                        <span className="text-xl font-bold text-emerald-600">
+                          {producer.name.charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-slate-900">{producer.name}</h3>
+                        <p className="text-sm text-slate-500">
+                          CPF: {formatCPF(producer.cpf)}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-semibold text-slate-900">{producer.name}</h3>
-                      <p className="text-sm text-slate-500">
-                        CPF: {formatCPF(producer.cpf)}
-                      </p>
+
+                    <div className="flex items-center gap-4">
+                      <Badge variant="outline" className="flex items-center gap-1">
+                        <Map size={14} />
+                        {producer._count.fields} talhão(ões)
+                      </Badge>
+
+                      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openEditModal(producer)}
+                        >
+                          <Pencil size={16} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDelete(producer)}
+                          className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                        >
+                          <Trash2 size={16} />
+                        </Button>
+                      </div>
+
+                      {isExpanded ? (
+                        <ChevronUp className="w-5 h-5 text-slate-400" />
+                      ) : (
+                        <ChevronDown className="w-5 h-5 text-slate-400" />
+                      )}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4">
-                    <Badge variant="outline" className="flex items-center gap-1">
-                      <Map size={14} />
-                      {producer._count.fields} talhão(ões)
-                    </Badge>
-
-                    <div className="flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEditModal(producer)}
-                      >
-                        <Pencil size={16} />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDelete(producer)}
-                        className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                      >
-                        <Trash2 size={16} />
-                      </Button>
+                  {/* Talhões expandidos */}
+                  {isExpanded && (
+                    <div className="border-t bg-slate-50 p-4">
+                      {loadingFields ? (
+                        <div className="flex items-center justify-center py-4">
+                          <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+                        </div>
+                      ) : producerFields.length === 0 ? (
+                        <p className="text-center text-slate-500 py-4">
+                          Nenhum talhão vinculado a este produtor
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
+                            Talhões de {producer.name}
+                          </h4>
+                          {producerFields.map(field => (
+                            <div
+                              key={field.id}
+                              className="flex items-center justify-between bg-white p-3 rounded-lg border"
+                            >
+                              <div className="flex items-center gap-4">
+                                <div>
+                                  <div className="font-medium text-slate-900">{field.name}</div>
+                                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                                    <MapPin className="w-3 h-3" />
+                                    {field.city || '—'}, {field.state || '—'}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-6 text-sm">
+                                <div className="text-right">
+                                  <div className="text-xs text-slate-400">Área</div>
+                                  <div className="font-medium">{field.areaHa?.toLocaleString('pt-BR') || '—'} ha</div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-xs text-slate-400">Volume</div>
+                                  <div className="font-medium text-emerald-600">
+                                    {field.agroData?.volumeEstimatedKg 
+                                      ? `${(field.agroData.volumeEstimatedKg / 1000).toFixed(0)} ton`
+                                      : '—'}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-xs text-slate-400">Status</div>
+                                  <Badge variant={
+                                    field.status === 'SUCCESS' ? 'success' :
+                                    field.status === 'PROCESSING' ? 'secondary' :
+                                    field.status === 'ERROR' ? 'error' : 'secondary'
+                                  } className="text-xs">
+                                    {field.status === 'SUCCESS' ? 'OK' : 
+                                     field.status === 'PROCESSING' ? 'Proc.' :
+                                     field.status === 'ERROR' ? 'Erro' : 'Pend.'}
+                                  </Badge>
+                                </div>
+                                <Link href={`/reports/${field.id}`}>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={field.status !== 'SUCCESS'}
+                                    className="text-slate-400 hover:text-emerald-600"
+                                  >
+                                    <Eye size={16} />
+                                  </Button>
+                                </Link>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                  )}
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
       )}
 
@@ -321,6 +483,30 @@ export default function ProducersPage() {
                   placeholder="000.000.000-00"
                   maxLength={14}
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  <span className="flex items-center gap-1">
+                    <Warehouse size={14} />
+                    Caixa Logística Padrão <span className="text-slate-400">(opcional)</span>
+                  </span>
+                </label>
+                <select
+                  value={formLogisticsUnitId}
+                  onChange={(e) => setFormLogisticsUnitId(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Nenhuma (automático por raio)</option>
+                  {logisticsUnits.map(unit => (
+                    <option key={unit.id} value={unit.id}>
+                      {unit.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  Todos os talhões deste produtor serão atribuídos a esta caixa, a menos que definido individualmente.
+                </p>
               </div>
 
               <div className="flex gap-3 pt-4 border-t">

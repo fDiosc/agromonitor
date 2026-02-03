@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { 
@@ -11,14 +11,16 @@ import {
   ArrowLeft,
   LayoutGrid,
   Users,
-  Warehouse
+  Warehouse,
+  ChevronDown,
+  X,
+  Settings
 } from 'lucide-react'
 import Link from 'next/link'
 import { OverviewTab } from './components/OverviewTab'
 import { ProducerTab } from './components/ProducerTab'
-import { ReceivingUnitTab } from './components/ReceivingUnitTab'
 
-type TabId = 'overview' | 'producer' | 'receiving-unit'
+type TabId = 'overview' | 'producer'
 
 interface Tab {
   id: TabId
@@ -30,8 +32,17 @@ interface Tab {
 const TABS: Tab[] = [
   { id: 'overview', label: 'Overview', icon: <LayoutGrid className="w-4 h-4" /> },
   { id: 'producer', label: 'Produtor', icon: <Users className="w-4 h-4" /> },
-  { id: 'receiving-unit', label: 'Unidade de Recebimento', icon: <Warehouse className="w-4 h-4" />, disabled: true },
 ]
+
+interface LogisticsUnit {
+  id: string
+  name: string
+  latitude: number | null
+  longitude: number | null
+  coverageRadiusKm: number | null
+  city?: string
+  state?: string
+}
 
 interface DiagnosticData {
   summary: {
@@ -83,12 +94,35 @@ export default function LogisticsDiagnosticPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabId>('overview')
+  
+  // Filtro de caixas logísticas
+  const [logisticsUnits, setLogisticsUnits] = useState<LogisticsUnit[]>([])
+  const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([])
+  const [showUnitDropdown, setShowUnitDropdown] = useState(false)
 
-  const fetchData = async () => {
+  const fetchLogisticsUnits = useCallback(async () => {
+    try {
+      const response = await fetch('/api/logistics-units')
+      if (response.ok) {
+        const result = await response.json()
+        setLogisticsUnits(result.logisticsUnits || [])
+      }
+    } catch (err) {
+      console.error('Error fetching logistics units:', err)
+    }
+  }, [])
+
+  const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch('/api/logistics/diagnostic')
+      // Construir URL com filtro de caixas logísticas
+      let url = '/api/logistics/diagnostic'
+      if (selectedUnitIds.length > 0) {
+        url += `?logisticsUnitIds=${selectedUnitIds.join(',')}`
+      }
+      
+      const response = await fetch(url)
       if (!response.ok) {
         throw new Error('Failed to fetch diagnostic data')
       }
@@ -99,11 +133,27 @@ export default function LogisticsDiagnosticPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [selectedUnitIds])
+
+  useEffect(() => {
+    fetchLogisticsUnits()
+  }, [fetchLogisticsUnits])
 
   useEffect(() => {
     fetchData()
-  }, [])
+  }, [fetchData])
+
+  const toggleUnit = (unitId: string) => {
+    setSelectedUnitIds(prev => 
+      prev.includes(unitId) 
+        ? prev.filter(id => id !== unitId)
+        : [...prev, unitId]
+    )
+  }
+
+  const clearUnitFilter = () => {
+    setSelectedUnitIds([])
+  }
 
   if (loading) {
     return (
@@ -171,16 +221,28 @@ export default function LogisticsDiagnosticPage() {
   const renderTabContent = () => {
     if (!data) return null
 
+    // Filtrar caixas selecionadas ou todas se nenhuma selecionada
+    const unitsToShow = selectedUnitIds.length > 0 
+      ? logisticsUnits.filter(u => selectedUnitIds.includes(u.id))
+      : logisticsUnits
+
     switch (activeTab) {
       case 'overview':
-        return <OverviewTab data={data} />
+        return <OverviewTab data={data} logisticsUnits={unitsToShow} />
       case 'producer':
         return <ProducerTab data={data} />
-      case 'receiving-unit':
-        return <ReceivingUnitTab />
       default:
-        return <OverviewTab data={data} />
+        return <OverviewTab data={data} logisticsUnits={unitsToShow} />
     }
+  }
+
+  const getSelectedUnitsLabel = () => {
+    if (selectedUnitIds.length === 0) return 'Todas as caixas'
+    if (selectedUnitIds.length === 1) {
+      const unit = logisticsUnits.find(u => u.id === selectedUnitIds[0])
+      return unit?.name || 'Caixa selecionada'
+    }
+    return `${selectedUnitIds.length} caixas selecionadas`
   }
 
   return (
@@ -210,31 +272,135 @@ export default function LogisticsDiagnosticPage() {
           </Button>
         </div>
 
-        {/* Tabs */}
-        <div className="flex items-center gap-1 bg-slate-800/50 p-1 rounded-lg border border-slate-700 w-fit">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => !tab.disabled && setActiveTab(tab.id)}
-              disabled={tab.disabled}
-              className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                activeTab === tab.id
-                  ? 'bg-blue-600 text-white shadow-lg'
-                  : tab.disabled
-                  ? 'text-slate-500 cursor-not-allowed'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-              }`}
-            >
-              {tab.icon}
-              {tab.label}
-              {tab.disabled && (
-                <span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">
-                  Em breve
-                </span>
-              )}
-            </button>
-          ))}
+        {/* Tabs + Filtro de Caixas Logísticas */}
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-center gap-1 bg-slate-800/50 p-1 rounded-lg border border-slate-700 w-fit">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => !tab.disabled && setActiveTab(tab.id)}
+                disabled={tab.disabled}
+                className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                  activeTab === tab.id
+                    ? 'bg-blue-600 text-white shadow-lg'
+                    : tab.disabled
+                    ? 'text-slate-500 cursor-not-allowed'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
+                }`}
+              >
+                {tab.icon}
+                {tab.label}
+                {tab.disabled && (
+                  <span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">
+                    Em breve
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Seletor de Caixas Logísticas */}
+          <div className="flex items-center gap-3">
+            {logisticsUnits.length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowUnitDropdown(!showUnitDropdown)}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-800/80 border border-slate-600 rounded-lg text-sm text-slate-200 hover:border-slate-500 transition-colors"
+                >
+                  <Warehouse className="w-4 h-4 text-amber-400" />
+                  {getSelectedUnitsLabel()}
+                  {selectedUnitIds.length > 0 && (
+                    <span className="bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded text-xs font-medium">
+                      {selectedUnitIds.length}
+                    </span>
+                  )}
+                  <ChevronDown className={`w-4 h-4 transition-transform ${showUnitDropdown ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showUnitDropdown && (
+                  <div className="absolute right-0 top-full mt-2 w-72 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50">
+                    <div className="p-2 border-b border-slate-700 flex items-center justify-between">
+                      <span className="text-sm text-slate-400">Filtrar por Caixa Logística</span>
+                      {selectedUnitIds.length > 0 && (
+                        <button
+                          onClick={clearUnitFilter}
+                          className="text-xs text-blue-400 hover:text-blue-300"
+                        >
+                          Limpar filtro
+                        </button>
+                      )}
+                    </div>
+                    <div className="max-h-64 overflow-y-auto p-1">
+                      {logisticsUnits.map(unit => (
+                        <button
+                          key={unit.id}
+                          onClick={() => toggleUnit(unit.id)}
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-left text-sm transition-colors ${
+                            selectedUnitIds.includes(unit.id)
+                              ? 'bg-amber-500/20 text-amber-300'
+                              : 'text-slate-300 hover:bg-slate-700'
+                          }`}
+                        >
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center ${
+                            selectedUnitIds.includes(unit.id)
+                              ? 'bg-amber-500 border-amber-500'
+                              : 'border-slate-500'
+                          }`}>
+                            {selectedUnitIds.includes(unit.id) && (
+                              <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-medium">{unit.name}</div>
+                            {unit.coverageRadiusKm && (
+                              <div className="text-xs text-slate-500">Raio: {unit.coverageRadiusKm} km</div>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <Link href="/dashboard/logistics-units">
+              <Button variant="outline" size="sm" className="gap-2 text-slate-300 border-slate-600 hover:bg-slate-700">
+                <Settings className="w-4 h-4" />
+                Gerenciar
+              </Button>
+            </Link>
+          </div>
         </div>
+
+        {/* Indicador de filtro ativo */}
+        {selectedUnitIds.length > 0 && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-slate-400">Filtrando por:</span>
+            <div className="flex flex-wrap gap-2">
+              {selectedUnitIds.map(unitId => {
+                const unit = logisticsUnits.find(u => u.id === unitId)
+                return (
+                  <span
+                    key={unitId}
+                    className="inline-flex items-center gap-1 px-2 py-1 bg-amber-500/20 text-amber-300 rounded-md"
+                  >
+                    <Warehouse className="w-3 h-3" />
+                    {unit?.name}
+                    <button
+                      onClick={() => toggleUnit(unitId)}
+                      className="ml-1 hover:text-amber-100"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Tab Content */}
         {renderTabContent()}

@@ -50,11 +50,22 @@ interface DiagnosticData {
   }
 }
 
-interface OverviewTabProps {
-  data: DiagnosticData
+interface LogisticsUnit {
+  id: string
+  name: string
+  latitude: number | null
+  longitude: number | null
+  coverageRadiusKm: number | null
+  city?: string
+  state?: string
 }
 
-export function OverviewTab({ data }: OverviewTabProps) {
+interface OverviewTabProps {
+  data: DiagnosticData
+  logisticsUnits?: LogisticsUnit[]
+}
+
+export function OverviewTab({ data, logisticsUnits = [] }: OverviewTabProps) {
   return (
     <div className="space-y-6">
       {/* Summary Cards */}
@@ -73,7 +84,7 @@ export function OverviewTab({ data }: OverviewTabProps) {
       <CriticalAlerts alerts={data.alerts} />
 
       {/* Properties Map */}
-      <PropertiesMap fields={data.fields} />
+      <PropertiesMap fields={data.fields} logisticsUnits={logisticsUnits} />
     </div>
   )
 }

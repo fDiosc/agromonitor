@@ -14,6 +14,7 @@ import {
   LogOut,
   ChevronRight,
   Building2,
+  Warehouse,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SidebarFooter } from './sidebar-footer'
@@ -32,7 +33,7 @@ const mainNavItems: NavItem[] = [
     icon: LayoutDashboard,
   },
   {
-    label: 'Talhões',
+    label: 'Gerenciar Talhões',
     href: '/fields',
     icon: Map,
   },
@@ -45,6 +46,11 @@ const mainNavItems: NavItem[] = [
     label: 'Diagnóstico Logístico',
     href: '/dashboard/logistics',
     icon: Truck,
+  },
+  {
+    label: 'Caixas Logísticas',
+    href: '/dashboard/logistics-units',
+    icon: Warehouse,
   },
   {
     label: 'Relatórios',
@@ -94,7 +100,9 @@ export function Sidebar({ user, onLogout }: SidebarProps) {
   
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/'
-    return pathname.startsWith(href)
+    // Verifica correspondência exata ou se o próximo caractere é /
+    // Isso evita que /dashboard/logistics-units corresponda a /dashboard/logistics
+    return pathname === href || pathname.startsWith(href + '/')
   }
 
   return (

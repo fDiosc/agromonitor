@@ -20,6 +20,9 @@ export async function GET() {
         _count: {
           select: { fields: true },
         },
+        defaultLogisticsUnit: {
+          select: { id: true, name: true }
+        }
       },
     })
 
@@ -50,7 +53,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { name, cpf } = body
+    const { name, cpf, defaultLogisticsUnitId } = body
 
     if (!name || name.trim() === '') {
       return NextResponse.json(
@@ -70,11 +73,28 @@ export async function POST(request: Request) {
       )
     }
 
+    // Validar que a caixa logística pertence ao workspace
+    if (defaultLogisticsUnitId) {
+      const unit = await prisma.logisticsUnit.findFirst({
+        where: {
+          id: defaultLogisticsUnitId,
+          workspaceId: session.workspaceId
+        }
+      })
+      if (!unit) {
+        return NextResponse.json(
+          { error: 'Caixa logística não encontrada' },
+          { status: 400 }
+        )
+      }
+    }
+
     const producer = await prisma.producer.create({
       data: {
         name: name.trim(),
         cpf: cpfClean,
         workspaceId: session.workspaceId,
+        defaultLogisticsUnitId: defaultLogisticsUnitId || null,
       },
     })
 
