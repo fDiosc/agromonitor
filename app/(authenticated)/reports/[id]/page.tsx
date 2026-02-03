@@ -99,22 +99,52 @@ export default function ReportPage() {
     if (!confirm('Reprocessar irá buscar novos dados de satélite e recalcular todas as análises. Continuar?')) return
 
     setIsReprocessing(true)
-    try {
-      const res = await fetch(`/api/fields/${fieldId}/process`, { method: 'POST' })
-      
-      if (res.ok) {
-        // Recarregar dados
-        await fetchData()
-      } else {
-        const data = await res.json()
-        alert(`Erro: ${data.error || 'Falha ao reprocessar'}`)
+    
+    // Iniciar processamento (fire and forget - não esperar resposta)
+    // O processamento pode levar até 5 minutos
+    fetch(`/api/fields/${fieldId}/process`, { method: 'POST' })
+      .catch(err => console.log('Process request sent:', err.message))
+
+    // Polling para verificar quando terminar
+    const pollInterval = 10000 // 10 segundos
+    const maxPolls = 36 // 6 minutos máximo
+    let polls = 0
+
+    const checkStatus = async (): Promise<void> => {
+      polls++
+      try {
+        const res = await fetch(`/api/fields/${fieldId}`)
+        if (res.ok) {
+          const fieldData = await res.json()
+          
+          if (fieldData.status === 'SUCCESS' || fieldData.status === 'PARTIAL') {
+            // Processamento concluído
+            await fetchData()
+            setIsReprocessing(false)
+            return
+          } else if (fieldData.status === 'ERROR') {
+            // Processamento falhou
+            alert(`Erro no processamento: ${fieldData.errorMessage || 'Erro desconhecido'}`)
+            await fetchData()
+            setIsReprocessing(false)
+            return
+          } else if (fieldData.status === 'PROCESSING' && polls < maxPolls) {
+            // Ainda processando
+            setTimeout(checkStatus, pollInterval)
+            return
+          }
+        }
+      } catch (error) {
+        console.error('Error checking field status:', error)
       }
-    } catch (error) {
-      console.error('Error reprocessing:', error)
-      alert('Erro ao reprocessar talhão')
-    } finally {
+
+      // Timeout - atualizar dados de qualquer forma
+      await fetchData()
       setIsReprocessing(false)
     }
+
+    // Iniciar polling após 5 segundos
+    setTimeout(checkStatus, 5000)
   }
 
   const handleSelectTemplate = async (templateId: string) => {

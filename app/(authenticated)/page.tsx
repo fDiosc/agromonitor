@@ -175,29 +175,59 @@ export default function DashboardPage() {
 
     setReprocessing(id)
     
-    // Atualizar status para PROCESSING
+    // Atualizar status para PROCESSING localmente
     setFields(prev => prev.map(f => 
       f.id === id ? { ...f, status: 'PROCESSING' } : f
     ))
 
-    try {
-      const res = await fetch(`/api/fields/${id}/process`, { method: 'POST' })
-      
-      if (res.ok) {
-        // Atualizar lista
-        await fetchFields()
-      } else {
-        const data = await res.json()
-        alert(`Erro: ${data.error || 'Falha ao reprocessar'}`)
-        await fetchFields()
+    // Iniciar processamento (fire and forget - não esperar resposta)
+    // O processamento pode levar até 5 minutos, então não esperamos
+    fetch(`/api/fields/${id}/process`, { method: 'POST' })
+      .catch(err => console.log('Process request sent (timeout expected for long processes):', err.message))
+
+    // Polling para verificar quando terminar
+    const pollInterval = 10000 // 10 segundos
+    const maxPolls = 36 // 6 minutos máximo
+    let polls = 0
+
+    const checkStatus = async (): Promise<void> => {
+      polls++
+      try {
+        const res = await fetch(`/api/fields/${id}`)
+        if (res.ok) {
+          const field = await res.json()
+          
+          if (field.status === 'SUCCESS' || field.status === 'PARTIAL') {
+            // Processamento concluído com sucesso
+            await fetchFields()
+            setReprocessing(null)
+            return
+          } else if (field.status === 'ERROR') {
+            // Processamento falhou
+            alert(`Erro no processamento: ${field.errorMessage || 'Erro desconhecido'}`)
+            await fetchFields()
+            setReprocessing(null)
+            return
+          } else if (field.status === 'PROCESSING' && polls < maxPolls) {
+            // Ainda processando, continuar polling
+            setTimeout(checkStatus, pollInterval)
+            return
+          }
+        }
+      } catch (error) {
+        console.error('Error checking field status:', error)
       }
-    } catch (error) {
-      console.error('Error reprocessing field:', error)
-      alert('Erro ao reprocessar talhão')
+
+      // Timeout ou erro - atualizar lista de qualquer forma
+      if (polls >= maxPolls) {
+        console.log('Polling timeout - processing may still be running')
+      }
       await fetchFields()
-    } finally {
       setReprocessing(null)
     }
+
+    // Iniciar polling após 5 segundos (dar tempo para o processamento começar)
+    setTimeout(checkStatus, 5000)
   }
 
   const clearFilters = () => {
