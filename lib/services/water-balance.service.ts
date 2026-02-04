@@ -75,6 +75,39 @@ function ensureFeatureCollection(geometry: any): any {
   return geometry
 }
 
+/**
+ * Extrai array de dados da resposta da API de forma robusta.
+ * A API Merx pode retornar a key com diferentes nomes:
+ * - 'talhao_0', 'talhao_1', etc. (índice do talhão)
+ * - 'fazenda_1' (para fazendas)
+ * - Nome do talhão informado na geometria (ex: 'Talhão 24')
+ * - Qualquer outro nome personalizado
+ * 
+ * Esta função busca o primeiro array disponível na resposta.
+ */
+function extractApiDataArray(data: any): any[] {
+  if (!data || typeof data !== 'object') return []
+  
+  // Tentar keys comuns primeiro para performance
+  const commonKeys = ['talhao_0', 'fazenda_1', 'field_centroid', 'balanco']
+  for (const key of commonKeys) {
+    if (Array.isArray(data[key]) && data[key].length > 0) {
+      return data[key]
+    }
+  }
+  
+  // Buscar qualquer key que contenha um array não-vazio
+  for (const key of Object.keys(data)) {
+    const value = data[key]
+    if (Array.isArray(value) && value.length > 0) {
+      console.log(`[API] Usando key dinâmica: "${key}" com ${value.length} items`)
+      return value
+    }
+  }
+  
+  return []
+}
+
 // ==================== API Functions ====================
 
 /**
@@ -123,10 +156,10 @@ export async function fetchWaterBalance(
     
     const data = await response.json()
     
-    // Processar resposta - formato pode variar
-    const rawPoints = data['talhao_0'] || data['fazenda_1'] || data.balanco || []
+    // Processar resposta de forma robusta (suporta qualquer nome de key)
+    const rawPoints = extractApiDataArray(data)
     
-    if (!Array.isArray(rawPoints) || rawPoints.length === 0) {
+    if (rawPoints.length === 0) {
       console.log('[WATER_BALANCE] No data returned from API')
       return getEmptyWaterBalanceData('UNAVAILABLE')
     }

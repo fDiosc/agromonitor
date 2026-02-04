@@ -22,6 +22,33 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.20] - 2026-02-04
+
+### Parsing Robusto de APIs Merx
+
+**Correção Crítica - APIs não reconheciam dados**:
+- API Merx retorna dados com key dinâmica (nome do talhão, ex: "Talhão 24")
+- Código esperava keys fixas (`talhao_0`, `fazenda_1`)
+- Resultado: dados existiam mas eram tratados como indisponíveis
+
+**Solução**:
+- Nova função `extractApiDataArray()` aplicada em todos os serviços
+- Busca primeiro arrays conhecidos (`talhao_0`, `fazenda_1`, etc.)
+- Se não encontrar, busca qualquer array não-vazio na resposta
+- Logs identificam quando key dinâmica é usada
+
+**Serviços Corrigidos**:
+- `thermal.service.ts` - Soma Térmica (GDD)
+- `water-balance.service.ts` - Balanço Hídrico  
+- `precipitation.service.ts` - Precipitação
+- `climate-envelope.service.ts` - Envelope Climático Histórico
+
+**Diagnóstico Identificado**:
+- Balanço Hídrico 422 para região PR: limitação de cobertura geográfica da API Merx (não é bug)
+- Temperatura para PR: funciona corretamente após correção
+
+---
+
 ## [0.0.19] - 2026-02-04
 
 ### Fusão de EOS e Melhorias de Precisão
