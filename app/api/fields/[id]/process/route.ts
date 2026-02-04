@@ -5,6 +5,10 @@ import { calculatePhenology } from '@/lib/services/phenology.service'
 import { calculateSphericalArea } from '@/lib/services/geometry.service'
 import { calculateHistoricalCorrelation } from '@/lib/services/correlation.service'
 import { analyzeZarc } from '@/lib/services/zarc.service'
+import { getPrecipitationForField, serializePrecipitation } from '@/lib/services/precipitation.service'
+import { getWaterBalanceForField, serializeWaterBalance } from '@/lib/services/water-balance.service'
+import { getThermalDataForField, serializeThermalData } from '@/lib/services/thermal.service'
+import { getClimateEnvelopeForField, serializeClimateEnvelope } from '@/lib/services/climate-envelope.service'
 
 interface RouteParams {
   params: { id: string }
@@ -121,6 +125,154 @@ export async function POST(
         console.log(`[PROCESS] ZARC: Janela ${zarcAnalysis.window.windowStart.toISOString().split('T')[0]} - ${zarcAnalysis.window.windowEnd.toISOString().split('T')[0]}, Status: ${zarcAnalysis.plantingStatus}`)
       }
 
+      // =======================================================
+      // BUSCAR DADOS DE PRECIPITAÇÃO (se feature habilitada)
+      // =======================================================
+      let precipitationData: string | null = null
+      let harvestAdjustment: any = null
+      
+      if (field.workspaceId) {
+        try {
+          const geometry = JSON.parse(field.geometryJson)
+          const harvestStart = phenology.eosDate ? new Date(phenology.eosDate) : undefined
+          
+          const precipResult = await getPrecipitationForField(
+            field.workspaceId,
+            geometry,
+            field.seasonStartDate,
+            harvestStart
+          )
+          
+          if (precipResult) {
+            precipitationData = serializePrecipitation(precipResult.data)
+            harvestAdjustment = precipResult.adjustment
+            
+            console.log('[PROCESS] Precipitação:', {
+              totalMm: precipResult.data.totalMm.toFixed(1),
+              rainyDays: precipResult.data.rainyDays,
+              source: precipResult.data.source,
+              adjustment: harvestAdjustment?.delayDays || 0
+            })
+          }
+        } catch (precipError) {
+          console.warn('[PROCESS] Erro ao buscar precipitação (continuando):', precipError)
+        }
+      }
+
+      // =======================================================
+      // BUSCAR DADOS DE BALANÇO HÍDRICO (se feature habilitada)
+      // =======================================================
+      let waterBalanceData: string | null = null
+      let eosAdjustment: any = null
+      
+      if (field.workspaceId) {
+        try {
+          const geometry = JSON.parse(field.geometryJson)
+          const eosDate = phenology.eosDate ? new Date(phenology.eosDate) : undefined
+          const plantingDate = phenology.plantingDate 
+            ? new Date(phenology.plantingDate) 
+            : field.seasonStartDate
+          
+          const waterBalanceResult = await getWaterBalanceForField(
+            field.workspaceId,
+            geometry,
+            plantingDate,
+            field.cropType,
+            eosDate
+          )
+          
+          if (waterBalanceResult) {
+            waterBalanceData = serializeWaterBalance(waterBalanceResult.data)
+            eosAdjustment = waterBalanceResult.adjustment
+            
+            console.log('[PROCESS] Balanço Hídrico:', {
+              totalDeficit: waterBalanceResult.data.totalDeficit.toFixed(1),
+              stressDays: waterBalanceResult.data.stressDays,
+              source: waterBalanceResult.data.source,
+              stressLevel: eosAdjustment?.stressLevel || 'N/A'
+            })
+          }
+        } catch (waterBalanceError) {
+          console.warn('[PROCESS] Erro ao buscar balanço hídrico (continuando):', waterBalanceError)
+        }
+      }
+
+      // =======================================================
+      // BUSCAR DADOS TÉRMICOS / GDD (se feature habilitada)
+      // =======================================================
+      let thermalData: string | null = null
+      
+      if (field.workspaceId) {
+        try {
+          const geometry = JSON.parse(field.geometryJson)
+          const plantingDate = phenology.plantingDate 
+            ? new Date(phenology.plantingDate) 
+            : field.seasonStartDate
+          
+          const thermalResult = await getThermalDataForField(
+            field.workspaceId,
+            geometry,
+            plantingDate,
+            field.cropType
+          )
+          
+          if (thermalResult) {
+            thermalData = serializeThermalData(thermalResult)
+            
+            console.log('[PROCESS] Soma Térmica (GDD):', {
+              accumulatedGdd: thermalResult.gddAnalysis.accumulatedGdd.toFixed(0),
+              requiredGdd: thermalResult.gddAnalysis.requiredGdd,
+              progressPercent: thermalResult.gddAnalysis.progressPercent.toFixed(1),
+              daysToMaturity: thermalResult.gddAnalysis.daysToMaturity,
+              confidence: thermalResult.gddAnalysis.confidence
+            })
+          }
+        } catch (thermalError) {
+          console.warn('[PROCESS] Erro ao buscar dados térmicos (continuando):', thermalError)
+        }
+      }
+
+      // =======================================================
+      // BUSCAR ENVELOPE CLIMÁTICO HISTÓRICO (se feature habilitada)
+      // =======================================================
+      let climateEnvelopeData: { precipitation: string | null, temperature: string | null } = {
+        precipitation: null,
+        temperature: null
+      }
+      
+      if (field.workspaceId) {
+        try {
+          const geometry = JSON.parse(field.geometryJson)
+          
+          const envelopeResult = await getClimateEnvelopeForField(
+            field.workspaceId,
+            geometry,
+            field.seasonStartDate
+          )
+          
+          if (envelopeResult) {
+            if (envelopeResult.precipitation) {
+              climateEnvelopeData.precipitation = serializeClimateEnvelope(envelopeResult.precipitation)
+              console.log('[PROCESS] Envelope Precipitação:', {
+                historicalYears: envelopeResult.precipitation.envelope.historicalYears,
+                anomalies: envelopeResult.precipitation.anomalies.length,
+                summary: envelopeResult.precipitation.summary
+              })
+            }
+            if (envelopeResult.temperature) {
+              climateEnvelopeData.temperature = serializeClimateEnvelope(envelopeResult.temperature)
+              console.log('[PROCESS] Envelope Temperatura:', {
+                historicalYears: envelopeResult.temperature.envelope.historicalYears,
+                anomalies: envelopeResult.temperature.anomalies.length,
+                summary: envelopeResult.temperature.summary
+              })
+            }
+          }
+        } catch (envelopeError) {
+          console.warn('[PROCESS] Erro ao calcular envelope climático (continuando):', envelopeError)
+        }
+      }
+
       // Salvar ou atualizar AgroData
       await prisma.agroData.upsert({
         where: { fieldId: params.id },
@@ -142,10 +294,10 @@ export async function POST(
           phenologyHealth: phenology.phenologyHealth,
           peakNdvi: phenology.peakNdvi,
           rawNdviData: JSON.stringify(merxReport.ndvi),
-          rawPrecipData: JSON.stringify(merxReport.precipitacao),
+          rawPrecipData: precipitationData || JSON.stringify(merxReport.precipitacao),
           rawSoilData: JSON.stringify(merxReport.solo),
           rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
-          rawAreaData: JSON.stringify({ area_ha: areaHa }),
+          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData }),
           rawZarcData: JSON.stringify(complementary.zarc_anual),
           zarcWindowStart: zarcAnalysis.window?.windowStart || null,
           zarcWindowEnd: zarcAnalysis.window?.windowEnd || null,
@@ -175,10 +327,10 @@ export async function POST(
           phenologyHealth: phenology.phenologyHealth,
           peakNdvi: phenology.peakNdvi,
           rawNdviData: JSON.stringify(merxReport.ndvi),
-          rawPrecipData: JSON.stringify(merxReport.precipitacao),
+          rawPrecipData: precipitationData || JSON.stringify(merxReport.precipitacao),
           rawSoilData: JSON.stringify(merxReport.solo),
           rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
-          rawAreaData: JSON.stringify({ area_ha: areaHa }),
+          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData }),
           rawZarcData: JSON.stringify(complementary.zarc_anual),
           zarcWindowStart: zarcAnalysis.window?.windowStart || null,
           zarcWindowEnd: zarcAnalysis.window?.windowEnd || null,

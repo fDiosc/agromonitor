@@ -22,6 +22,43 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.19] - 2026-02-04
+
+### Fusão de EOS e Melhorias de Precisão
+
+**Algoritmo de Fusão EOS (NDVI + GDD + Balanço Hídrico)**:
+- Novo serviço `eos-fusion.service.ts` baseado em metodologias científicas (PhenoCrop, Kumudini, Mourtzinis, Desclaux)
+- Combina projeções NDVI histórico, Soma Térmica (GDD) e ajuste por estresse hídrico
+- Detecta inconsistências (ex: EOS NDVI passou mas planta ainda verde) e ajusta automaticamente
+- Estresse hídrico acelera senescência (-2 a -7 dias conforme severidade)
+- Determina estágio fenológico atual (Vegetativo, Reprodutivo, Enchimento, Senescência, Maturação)
+
+**Tooltip de Confiança no EOS**:
+- Badge interativo mostrando método usado (NDVI, GDD, Fusão)
+- Nível de confiança (Alta/Média/Baixa) com cores
+- Tooltip detalhado com explicação, fatores e projeções individuais
+- Comparativo NDVI vs GDD com status de cada projeção
+- Alertas quando há divergências ou ajustes
+
+**Linha de Colheita no Gráfico NDVI**:
+- Linha de "Início Colheita" agora usa data da fusão EOS (mais precisa)
+- Prioriza `eosFusion.eos` sobre dados antigos do banco
+
+**Confiança do Modelo Unificada**:
+- Card "Confiança Modelo" agora usa confiança da fusão EOS quando disponível
+- Fallback para confiança NDVI quando não há fusão
+
+**Correções**:
+- Bug do "0" ao lado da badge de Risco Qualidade (condição `0 && x > 0` renderizava "0")
+- Removidos console.logs de debug
+
+**Documentação**:
+- Nova seção 4.5 na Metodologia V2: Fusão de EOS
+- Referências científicas atualizadas (Sakamoto 2020, Kumudini 2021, Mourtzinis 2017, Desclaux 2003)
+- Thresholds de NDVI e algoritmo de seleção documentados
+
+---
+
 ## [0.0.18] - 2026-02-03
 
 ### Gestão de Usuários e Estabilidade

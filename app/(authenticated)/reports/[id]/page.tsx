@@ -7,9 +7,17 @@ import { MetricCards } from '@/components/agro/metric-cards'
 import { PhenologyTimeline } from '@/components/agro/phenology-timeline'
 import { TemplateSelector } from '@/components/templates/template-selector'
 import { AnalysisPanel } from '@/components/templates/analysis-panel'
+import { PrecipitationChart } from '@/components/charts/PrecipitationChart'
+import { ClimateEnvelopeChart } from '@/components/charts/ClimateEnvelopeChart'
+import { WaterBalanceChart } from '@/components/charts/WaterBalanceChart'
+import { GddChart } from '@/components/charts/GddChart'
+import { SoilInfoCard } from '@/components/cards/SoilInfoCard'
+import { SatelliteScheduleCard } from '@/components/satellite/SatelliteScheduleCard'
+import { calculateFusedEos, EosFusionInput, EosFusionResult } from '@/lib/services/eos-fusion.service'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { ArrowLeft, Loader2, TrendingUp, RefreshCw } from 'lucide-react'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { ArrowLeft, Loader2, TrendingUp, RefreshCw, CloudRain, Droplets, Satellite, Thermometer } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   ResponsiveContainer,
@@ -30,6 +38,255 @@ interface Template {
   description: string
   icon: string
   color: string
+}
+
+// ==================== Analysis Tabs Component ====================
+interface AnalysisTabsProps {
+  featureFlags: any
+  precipitationData: any
+  harvestWindow: any
+  harvestAdjustment: any
+  waterBalanceData: any
+  eosAdjustment: any
+  thermalData: any
+  climateEnvelopeData: any
+  soilData: any
+  satelliteSchedule: any
+  fieldId: string
+  cropType: string
+}
+
+function AnalysisTabs({
+  featureFlags,
+  precipitationData,
+  harvestWindow,
+  harvestAdjustment,
+  waterBalanceData,
+  eosAdjustment,
+  thermalData,
+  climateEnvelopeData,
+  soilData,
+  satelliteSchedule,
+  fieldId,
+  cropType
+}: AnalysisTabsProps) {
+  // Determinar quais tabs mostrar
+  const showClima = (
+    (precipitationData?.points?.length > 0 && featureFlags?.showPrecipitationChart !== false) ||
+    (thermalData?.temperature?.points?.length > 0 && featureFlags?.showGddChart === true) ||
+    (climateEnvelopeData?.precipitation && featureFlags?.showClimateEnvelope === true) ||
+    (climateEnvelopeData?.temperature && featureFlags?.showClimateEnvelope === true)
+  )
+  
+  const showBalancoHidrico = (
+    waterBalanceData?.points?.length > 0 && featureFlags?.showWaterBalanceChart === true
+  )
+  
+  const showSatelite = (
+    (satelliteSchedule && featureFlags?.showSatelliteSchedule !== false) ||
+    (soilData && featureFlags?.showSoilInfo !== false)
+  )
+
+  // Se não há nenhum dado adicional, não mostrar tabs
+  if (!showClima && !showBalancoHidrico && !showSatelite) {
+    return null
+  }
+
+  return (
+    <Card className="p-6 rounded-[32px]">
+      <Tabs defaultValue="clima" className="w-full">
+        <TabsList className="w-full flex justify-start gap-2 bg-slate-100/50 p-2 rounded-2xl mb-6">
+          {showClima && (
+            <TabsTrigger 
+              value="clima" 
+              className="flex items-center gap-2 px-4 py-2.5 data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-xl"
+            >
+              <CloudRain size={16} />
+              <span>Clima</span>
+            </TabsTrigger>
+          )}
+          
+          {showBalancoHidrico && (
+            <TabsTrigger 
+              value="balanco" 
+              className="flex items-center gap-2 px-4 py-2.5 data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-xl"
+            >
+              <Droplets size={16} />
+              <span>Balanço Hídrico</span>
+            </TabsTrigger>
+          )}
+          
+          {showSatelite && (
+            <TabsTrigger 
+              value="satelite" 
+              className="flex items-center gap-2 px-4 py-2.5 data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-xl"
+            >
+              <Satellite size={16} />
+              <span>Satélite & Solo</span>
+            </TabsTrigger>
+          )}
+        </TabsList>
+
+        {/* Tab Clima: Precipitação + Temperatura/GDD + Envelope Climático */}
+        {showClima && (
+          <TabsContent value="clima" className="space-y-6 mt-0">
+            {/* Precipitação */}
+            {precipitationData?.points?.length > 0 && featureFlags?.showPrecipitationChart !== false && (
+              <PrecipitationChart
+                data={precipitationData.points}
+                totalMm={precipitationData.totalMm || 0}
+                avgDailyMm={precipitationData.avgDailyMm || 0}
+                rainyDays={precipitationData.rainyDays || 0}
+                harvestStart={harvestWindow?.startDate}
+                harvestEnd={harvestWindow?.endDate}
+                grainQualityRisk={harvestAdjustment?.grainQualityRisk}
+                recentPrecipMm={harvestAdjustment?.recentPrecipMm}
+                delayDays={harvestAdjustment?.delayDays}
+              />
+            )}
+
+            {/* GDD Chart */}
+            {thermalData?.temperature?.points?.length > 0 && featureFlags?.showGddChart === true && (
+              <GddChart
+                data={thermalData.temperature.points}
+                accumulatedGdd={thermalData.gddAnalysis?.accumulatedGdd || 0}
+                requiredGdd={thermalData.gddAnalysis?.requiredGdd || 1300}
+                progressPercent={thermalData.gddAnalysis?.progressPercent || 0}
+                daysToMaturity={thermalData.gddAnalysis?.daysToMaturity}
+                projectedEos={thermalData.gddAnalysis?.projectedEos}
+                confidence={thermalData.gddAnalysis?.confidence || 'LOW'}
+                crop={cropType}
+              />
+            )}
+
+            {/* Climate Envelope - Precipitação */}
+            {climateEnvelopeData?.precipitation?.envelope?.points?.length > 0 && featureFlags?.showClimateEnvelope === true && (
+              <ClimateEnvelopeChart
+                type="PRECIPITATION"
+                data={formatEnvelopeForChartFn(climateEnvelopeData.precipitation)}
+                summary={climateEnvelopeData.precipitation.summary}
+                historicalYears={climateEnvelopeData.precipitation.envelope?.historicalYears || 5}
+                riskLevel={getRiskLevelFn(climateEnvelopeData.precipitation.summary)}
+              />
+            )}
+
+            {/* Climate Envelope - Temperatura */}
+            {climateEnvelopeData?.temperature?.envelope?.points?.length > 0 && featureFlags?.showClimateEnvelope === true && (
+              <ClimateEnvelopeChart
+                type="TEMPERATURE"
+                data={formatEnvelopeForChartFn(climateEnvelopeData.temperature)}
+                summary={climateEnvelopeData.temperature.summary}
+                historicalYears={climateEnvelopeData.temperature.envelope?.historicalYears || 3}
+                riskLevel={getRiskLevelFn(climateEnvelopeData.temperature.summary)}
+              />
+            )}
+
+            {/* Mensagem se não há envelope climático */}
+            {(!climateEnvelopeData?.precipitation?.envelope?.points?.length && 
+              !climateEnvelopeData?.temperature?.envelope?.points?.length && 
+              featureFlags?.showClimateEnvelope === true) && (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm">
+                <div className="font-medium">Envelope Climático Indisponível</div>
+                <p className="text-xs mt-1">
+                  Dados históricos insuficientes para gerar o envelope climático. 
+                  É necessário ao menos 2 anos de dados históricos.
+                </p>
+              </div>
+            )}
+          </TabsContent>
+        )}
+
+        {/* Tab Balanço Hídrico */}
+        {showBalancoHidrico && (
+          <TabsContent value="balanco" className="space-y-6 mt-0">
+            <WaterBalanceChart
+              data={waterBalanceData.points}
+              totalDeficit={waterBalanceData.totalDeficit || 0}
+              totalExcess={waterBalanceData.totalExcess || 0}
+              stressDays={waterBalanceData.stressDays || 0}
+              excessDays={waterBalanceData.excessDays || 0}
+              stressLevel={eosAdjustment?.stressLevel}
+              yieldImpact={eosAdjustment?.yieldImpact}
+              adjustmentReason={eosAdjustment?.reason}
+            />
+          </TabsContent>
+        )}
+
+        {/* Tab Satélite & Solo */}
+        {showSatelite && (
+          <TabsContent value="satelite" className="space-y-6 mt-0">
+            {/* Satellite Schedule */}
+            {satelliteSchedule && featureFlags?.showSatelliteSchedule !== false && (
+              <SatelliteScheduleCard
+                fieldId={fieldId}
+                lastS2Date={satelliteSchedule.lastS2Date}
+                nextS2Date={satelliteSchedule.nextS2Date}
+                lastS1Date={satelliteSchedule.lastS1Date}
+                nextS1Date={satelliteSchedule.nextS1Date}
+                daysUntilNextData={satelliteSchedule.daysUntilNextData}
+                upcomingPasses={satelliteSchedule.upcomingPasses}
+              />
+            )}
+
+            {/* Soil Info */}
+            {soilData && featureFlags?.showSoilInfo !== false && (
+              <SoilInfoCard data={soilData} />
+            )}
+          </TabsContent>
+        )}
+      </Tabs>
+    </Card>
+  )
+}
+
+// Helper functions for AnalysisTabs
+function formatEnvelopeForChartFn(envelopeResult: any): any[] {
+  if (!envelopeResult?.envelope?.points) return []
+  
+  const currentYear = new Date().getFullYear()
+  const points = envelopeResult.envelope.points || []
+  const currentSeason = envelopeResult.currentSeason || []
+  
+  const currentMap = new Map<number, number>()
+  for (const pt of currentSeason) {
+    const doy = pt.dayOfYear || getDayOfYearFn(pt.date)
+    currentMap.set(doy, pt.value)
+  }
+  
+  const daysWithData = new Set(currentSeason.map((pt: any) => pt.dayOfYear || getDayOfYearFn(pt.date)))
+  
+  return points
+    .filter((p: any) => daysWithData.has(p.dayOfYear))
+    .map((p: any) => ({
+      date: getDateFromDayOfYearFn(p.dayOfYear, currentYear),
+      mean: p.mean,
+      upper: p.upper,
+      lower: p.lower,
+      current: currentMap.get(p.dayOfYear),
+      isAnomaly: currentMap.has(p.dayOfYear) && 
+        (currentMap.get(p.dayOfYear)! > p.upper || currentMap.get(p.dayOfYear)! < p.lower)
+    }))
+}
+
+function getDayOfYearFn(date: string | Date): number {
+  const d = typeof date === 'string' ? new Date(date) : date
+  const start = new Date(d.getFullYear(), 0, 0)
+  const diff = d.getTime() - start.getTime()
+  const oneDay = 1000 * 60 * 60 * 24
+  return Math.floor(diff / oneDay)
+}
+
+function getDateFromDayOfYearFn(dayOfYear: number, year: number): string {
+  const date = new Date(year, 0, dayOfYear)
+  return date.toISOString().split('T')[0]
+}
+
+function getRiskLevelFn(summary: any): 'BAIXO' | 'MEDIO' | 'ALTO' | 'CRITICO' {
+  if (!summary) return 'BAIXO'
+  if (summary.extremeEvents >= 5) return 'CRITICO'
+  if (summary.extremeEvents >= 2 || Math.abs(summary.avgDeviation) > 2) return 'ALTO'
+  if (summary.daysAboveNormal + summary.daysBelowNormal > 10) return 'MEDIO'
+  return 'BAIXO'
 }
 
 interface CycleAnalysis {
@@ -53,6 +310,16 @@ export default function ReportPage() {
   const [chartOverlayData, setChartOverlayData] = useState<any[]>([])
   const [harvestWindowData, setHarvestWindowData] = useState<any>(null)
   const [zarcInfo, setZarcInfo] = useState<any>(null)
+  const [precipitationData, setPrecipitationData] = useState<any>(null)
+  const [harvestAdjustment, setHarvestAdjustment] = useState<any>(null)
+  const [waterBalanceData, setWaterBalanceData] = useState<any>(null)
+  const [eosAdjustment, setEosAdjustment] = useState<any>(null)
+  const [thermalData, setThermalData] = useState<any>(null)
+  const [soilData, setSoilData] = useState<any>(null)
+  const [climateEnvelopeData, setClimateEnvelopeData] = useState<any>(null)
+  const [featureFlags, setFeatureFlags] = useState<any>(null)
+  const [satelliteSchedule, setSatelliteSchedule] = useState<any>(null)
+  const [eosFusion, setEosFusion] = useState<EosFusionResult | null>(null)
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null)
@@ -62,13 +329,15 @@ export default function ReportPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [fieldRes, templatesRes] = await Promise.all([
+      const [fieldRes, templatesRes, settingsRes] = await Promise.all([
         fetch(`/api/fields/${fieldId}`),
-        fetch('/api/templates')
+        fetch('/api/templates'),
+        fetch('/api/workspace/settings')
       ])
 
       const fieldData = await fieldRes.json()
       const templatesData = await templatesRes.json()
+      const settingsData = settingsRes.ok ? await settingsRes.json() : null
 
       setField(fieldData.field)
       setHistoricalNdvi(fieldData.historicalNdvi || [])
@@ -78,6 +347,259 @@ export default function ReportPage() {
       setHarvestWindowData(fieldData.harvestWindow || null)
       setZarcInfo(fieldData.zarcInfo || null)
       setTemplates(templatesData.templates || [])
+      setFeatureFlags(settingsData?.featureFlags || null)
+
+      // Parse precipitation data from rawPrecipData
+      const agroData = fieldData.field?.agroData
+      if (agroData?.rawPrecipData) {
+        try {
+          const precip = JSON.parse(agroData.rawPrecipData)
+          if (precip.points) {
+            // Novo formato (precipitation.service)
+            setPrecipitationData(precip)
+          }
+        } catch {
+          setPrecipitationData(null)
+        }
+      }
+
+      // Parse harvest adjustment and water balance from rawAreaData
+      if (agroData?.rawAreaData) {
+        try {
+          const areaData = JSON.parse(agroData.rawAreaData)
+          
+          if (areaData.harvestAdjustment) {
+            setHarvestAdjustment(areaData.harvestAdjustment)
+          }
+          if (areaData.waterBalance) {
+            const wb = typeof areaData.waterBalance === 'string' 
+              ? JSON.parse(areaData.waterBalance) 
+              : areaData.waterBalance
+            setWaterBalanceData(wb)
+          }
+          if (areaData.eosAdjustment) {
+            setEosAdjustment(areaData.eosAdjustment)
+          }
+          if (areaData.thermal) {
+            const thermal = typeof areaData.thermal === 'string' 
+              ? JSON.parse(areaData.thermal) 
+              : areaData.thermal
+            setThermalData(thermal)
+          }
+          if (areaData.climateEnvelope) {
+            const envelope = areaData.climateEnvelope
+            
+            const parsed: any = {}
+            if (envelope.precipitation) {
+              parsed.precipitation = typeof envelope.precipitation === 'string'
+                ? JSON.parse(envelope.precipitation)
+                : envelope.precipitation
+            }
+            if (envelope.temperature) {
+              parsed.temperature = typeof envelope.temperature === 'string'
+                ? JSON.parse(envelope.temperature)
+                : envelope.temperature
+            }
+            setClimateEnvelopeData(parsed)
+          }
+        } catch {
+          // Silently handle parsing errors
+          setHarvestAdjustment(null)
+          setWaterBalanceData(null)
+          setEosAdjustment(null)
+          setThermalData(null)
+          setClimateEnvelopeData(null)
+        }
+      }
+
+      // Parse soil data from rawSoilData
+      if (agroData?.rawSoilData) {
+        try {
+          const soil = JSON.parse(agroData.rawSoilData)
+          // Pode vir como array (talhao_0) ou objeto direto
+          const soilInfo = Array.isArray(soil) ? soil[0] : (soil['talhao_0']?.[0] || soil)
+          setSoilData(soilInfo)
+        } catch {
+          setSoilData(null)
+        }
+      }
+
+      // Calculate EOS Fusion (combine NDVI + GDD + Water Balance)
+      try {
+        const ndviPoints = fieldData.field?.ndviData || []
+        const currentSeasonNdvi = ndviPoints.filter((p: any) => !p.isHistorical)
+        
+        // Get current and peak NDVI
+        let currentNdvi = 0
+        let peakNdvi = 0
+        let ndviDeclineRate = 0
+        
+        if (currentSeasonNdvi.length > 0) {
+          const lastPt = currentSeasonNdvi[currentSeasonNdvi.length - 1]
+          currentNdvi = lastPt?.ndviSmooth || lastPt?.ndviRaw || 0
+          
+          // Find peak
+          for (const pt of currentSeasonNdvi) {
+            const val = pt.ndviSmooth || pt.ndviRaw || 0
+            if (val > peakNdvi) peakNdvi = val
+          }
+          
+          // Calculate decline rate (last 5 points)
+          if (currentSeasonNdvi.length >= 5) {
+            const recentPoints = currentSeasonNdvi.slice(-5)
+            const firstVal = recentPoints[0]?.ndviSmooth || recentPoints[0]?.ndviRaw || 0
+            const lastVal = recentPoints[recentPoints.length - 1]?.ndviSmooth || recentPoints[recentPoints.length - 1]?.ndviRaw || 0
+            ndviDeclineRate = firstVal > 0 ? ((firstVal - lastVal) / firstVal) * 100 / 5 : 0
+          }
+        }
+        
+        // Parse GDD data
+        let gddAccumulated = 0
+        let gddRequired = 1300
+        let gddConfidence: 'HIGH' | 'MEDIUM' | 'LOW' = 'LOW'
+        let eosGdd: Date | null = null
+        
+        if (agroData?.rawAreaData) {
+          try {
+            const areaData = JSON.parse(agroData.rawAreaData)
+            const thermal = areaData.thermal
+            if (thermal) {
+              const thermalParsed = typeof thermal === 'string' ? JSON.parse(thermal) : thermal
+              if (thermalParsed.gddAnalysis) {
+                gddAccumulated = thermalParsed.gddAnalysis.accumulatedGdd || 0
+                gddRequired = thermalParsed.gddAnalysis.requiredGdd || 1300
+                gddConfidence = thermalParsed.gddAnalysis.confidence || 'LOW'
+                if (thermalParsed.gddAnalysis.projectedEos) {
+                  eosGdd = new Date(thermalParsed.gddAnalysis.projectedEos)
+                }
+              }
+            }
+          } catch {
+            // Silently handle GDD parsing errors
+          }
+        }
+        
+        // Parse water balance
+        let waterStressLevel: 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'NONE'
+        let stressDays = 0
+        let yieldImpact = 0
+        
+        if (agroData?.rawAreaData) {
+          try {
+            const areaData = JSON.parse(agroData.rawAreaData)
+            const wb = areaData.waterBalance
+            if (wb) {
+              const wbParsed = typeof wb === 'string' ? JSON.parse(wb) : wb
+              stressDays = wbParsed.stressDays || 0
+              if (stressDays >= 20) waterStressLevel = 'CRITICAL'
+              else if (stressDays >= 10) waterStressLevel = 'HIGH'
+              else if (stressDays >= 5) waterStressLevel = 'MEDIUM'
+              else if (stressDays > 0) waterStressLevel = 'LOW'
+              
+              // Estimate yield impact
+              if (wbParsed.totalDeficit > 300) yieldImpact = -30
+              else if (wbParsed.totalDeficit > 150) yieldImpact = -15
+              else if (wbParsed.totalDeficit > 50) yieldImpact = -5
+            }
+          } catch {}
+        }
+        
+        // Calculate fusion
+        if (agroData?.eosDate || eosGdd) {
+          const fusionInput: EosFusionInput = {
+            eosNdvi: agroData?.eosDate ? new Date(agroData.eosDate) : null,
+            ndviConfidence: agroData?.confidenceScore || 50,
+            currentNdvi,
+            peakNdvi,
+            ndviDeclineRate,
+            eosGdd,
+            gddConfidence,
+            gddAccumulated,
+            gddRequired,
+            waterStressLevel,
+            stressDays,
+            yieldImpact,
+            plantingDate: agroData?.plantingDate ? new Date(agroData.plantingDate) : new Date(),
+            cropType: fieldData.field?.cropType || 'SOJA'
+          }
+          
+          const fusionResult = calculateFusedEos(fusionInput)
+          setEosFusion(fusionResult)
+        }
+      } catch (e) {
+        // EOS fusion calculation failed - using fallback
+        setEosFusion(null)
+      }
+
+      // Calculate satellite schedule from NDVI data
+      const ndviPoints = fieldData.field?.ndviData || []
+      const currentSeasonNdvi = ndviPoints.filter((p: any) => !p.isHistorical)
+      if (currentSeasonNdvi.length > 0) {
+        const lastNdviDate = currentSeasonNdvi[currentSeasonNdvi.length - 1]?.date
+        if (lastNdviDate) {
+          const lastDate = new Date(lastNdviDate)
+          const today = new Date()
+          today.setHours(0, 0, 0, 0)
+          
+          // CORREÇÃO: Calcular próxima passagem que seja FUTURA (após hoje)
+          const s2RevisitDays = 5
+          const s1RevisitDays = 6
+          
+          // Loop até encontrar a próxima passagem S2 que seja >= hoje
+          const nextS2 = new Date(lastDate)
+          while (nextS2 <= today) {
+            nextS2.setDate(nextS2.getDate() + s2RevisitDays)
+          }
+          
+          // Loop até encontrar a próxima passagem S1 que seja >= hoje
+          const nextS1 = new Date(lastDate)
+          while (nextS1 <= today) {
+            nextS1.setDate(nextS1.getDate() + s1RevisitDays)
+          }
+          
+          const daysUntilS2 = Math.ceil((nextS2.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+          const daysUntilS1 = Math.ceil((nextS1.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+          
+          // Gerar próximas 4 passagens
+          const upcomingPasses: Array<{ date: string; satellite: string; daysAway: number }> = []
+          
+          // Próximas 2 passagens S2
+          let s2Pass = new Date(nextS2)
+          for (let i = 0; i < 2; i++) {
+            const daysAway = Math.ceil((s2Pass.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+            upcomingPasses.push({
+              date: s2Pass.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+              satellite: 'S2A',
+              daysAway
+            })
+            s2Pass.setDate(s2Pass.getDate() + s2RevisitDays)
+          }
+          
+          // Próximas 2 passagens S1
+          let s1Pass = new Date(nextS1)
+          for (let i = 0; i < 2; i++) {
+            const daysAway = Math.ceil((s1Pass.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+            upcomingPasses.push({
+              date: s1Pass.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+              satellite: 'S1A',
+              daysAway
+            })
+            s1Pass.setDate(s1Pass.getDate() + s1RevisitDays)
+          }
+          
+          // Ordenar por data mais próxima
+          upcomingPasses.sort((a, b) => a.daysAway - b.daysAway)
+          
+          setSatelliteSchedule({
+            lastS2Date: lastNdviDate,
+            nextS2Date: nextS2.toISOString(),
+            lastS1Date: null, // Radar not yet integrated
+            nextS1Date: nextS1.toISOString(),
+            daysUntilNextData: Math.min(daysUntilS2, daysUntilS1),
+            upcomingPasses
+          })
+        }
+      }
 
       // Select first analyzed template or first template
       const analyzedIds = fieldData.field?.analyses?.map((a: any) => a.templateId) || []
@@ -103,7 +625,7 @@ export default function ReportPage() {
     // Iniciar processamento (fire and forget - não esperar resposta)
     // O processamento pode levar até 5 minutos
     fetch(`/api/fields/${fieldId}/process`, { method: 'POST' })
-      .catch(err => console.log('Process request sent:', err.message))
+      .catch(() => { /* Request sent, processing in background */ })
 
     // Polling para verificar quando terminar
     const pollInterval = 10000 // 10 segundos
@@ -210,24 +732,51 @@ export default function ReportPage() {
   const hasHistoricalCycles = (cycleAnalysis?.historicalCycles?.length ?? 0) > 0
   const numHistoricalYears = cycleAnalysis?.historicalCycles?.length ?? 0
 
-  // Usar dados da janela de colheita da API ou calcular localmente
-  const harvestWindow = harvestWindowData || (() => {
-    if (!agroData?.eosDate) return null
-    
-    const areaHa = agroData.areaHa || 100
-    const harvestCapacityHaPerDay = 50 // Capacidade média de colheita: 50 ha/dia
-    const harvestDays = Math.ceil(areaHa / harvestCapacityHaPerDay)
-    
-    const harvestStartDate = new Date(agroData.eosDate)
-    const harvestEndDate = new Date(agroData.eosDate)
-    harvestEndDate.setDate(harvestEndDate.getDate() + harvestDays)
-    
-    return {
-      startDate: harvestStartDate.toISOString().split('T')[0],
-      endDate: harvestEndDate.toISOString().split('T')[0],
-      daysToHarvest: harvestDays,
-      areaHa
+  // Calcular janela de colheita
+  // SEMPRE usar eosFusion.eos quando disponível (é o mais preciso), senão usar harvestWindowData da API ou calcular
+  const harvestWindow = (() => {
+    // Se temos eosFusion, SEMPRE usar essa data (sobrescreve dados da API)
+    if (eosFusion?.eos) {
+      const areaHa = agroData?.areaHa || 100
+      const harvestCapacityHaPerDay = 50
+      const harvestDays = Math.ceil(areaHa / harvestCapacityHaPerDay)
+      
+      const harvestStartDate = new Date(eosFusion.eos)
+      const harvestEndDate = new Date(eosFusion.eos)
+      harvestEndDate.setDate(harvestEndDate.getDate() + harvestDays)
+      
+      return {
+        startDate: harvestStartDate.toISOString().split('T')[0],
+        endDate: harvestEndDate.toISOString().split('T')[0],
+        source: 'fusion'
+      }
     }
+    
+    // Fallback para dados da API
+    if (harvestWindowData) {
+      return harvestWindowData
+    }
+    
+    // Fallback para cálculo local com agroData.eosDate
+    if (agroData?.eosDate) {
+      const areaHa = agroData.areaHa || 100
+      const harvestCapacityHaPerDay = 50
+      const harvestDays = Math.ceil(areaHa / harvestCapacityHaPerDay)
+      
+      const harvestStartDate = new Date(agroData.eosDate)
+      const harvestEndDate = new Date(agroData.eosDate)
+      harvestEndDate.setDate(harvestEndDate.getDate() + harvestDays)
+      
+      return {
+        startDate: harvestStartDate.toISOString().split('T')[0],
+        endDate: harvestEndDate.toISOString().split('T')[0],
+        daysToHarvest: harvestDays,
+        areaHa,
+        source: 'agroData'
+      }
+    }
+    
+    return null
   })()
 
   return (
@@ -272,21 +821,43 @@ export default function ReportPage() {
         </div>
 
         {/* Metric Cards */}
+        {/* Usa confiança da fusão EOS quando disponível, senão usa NDVI (default) */}
         <MetricCards
           areaHa={agroData?.areaHa}
           volumeEstimatedKg={agroData?.volumeEstimatedKg}
           historicalCorrelation={agroData?.historicalCorrelation}
-          confidenceScore={agroData?.confidenceScore}
-          confidence={agroData?.confidence}
+          confidenceScore={eosFusion ? eosFusion.confidence : agroData?.confidenceScore}
+          confidence={eosFusion ? (eosFusion.confidence >= 75 ? 'HIGH' : eosFusion.confidence >= 50 ? 'MEDIUM' : 'LOW') : agroData?.confidence}
         />
 
-        {/* Phenology Timeline - com ZARC integrado */}
+        {/* Phenology Timeline - com ZARC e EOS Fusion integrados */}
         <PhenologyTimeline
           plantingDate={agroData?.plantingDate}
           sosDate={agroData?.sosDate}
-          eosDate={agroData?.eosDate}
+          eosDate={eosFusion ? eosFusion.eos.toISOString() : agroData?.eosDate}
           method={agroData?.phenologyMethod}
           zarcInfo={zarcInfo}
+          eosFusion={eosFusion ? {
+            method: eosFusion.method,
+            confidence: eosFusion.confidence,
+            phenologicalStage: eosFusion.phenologicalStage,
+            explanation: eosFusion.explanation,
+            factors: eosFusion.factors,
+            projections: {
+              ndvi: {
+                date: eosFusion.projections.ndvi.date?.toISOString() || null,
+                confidence: eosFusion.projections.ndvi.confidence,
+                status: eosFusion.projections.ndvi.status
+              },
+              gdd: {
+                date: eosFusion.projections.gdd.date?.toISOString() || null,
+                confidence: eosFusion.projections.gdd.confidence,
+                status: eosFusion.projections.gdd.status
+              },
+              waterAdjustment: eosFusion.projections.waterAdjustment
+            },
+            warnings: eosFusion.warnings
+          } : null}
         />
 
         {/* NDVI Chart */}
@@ -324,10 +895,15 @@ export default function ReportPage() {
                       Aderência ao histórico: <span className="font-bold text-emerald-600">{agroData.historicalCorrelation}%</span>
                     </span>
                   ) : null}
-                  {agroData?.eosDate && (
+                  {(eosFusion || agroData?.eosDate) && (
                     <span>
                       Previsão colheita: <span className="font-bold text-amber-600">
-                        {new Date(agroData.eosDate).toLocaleDateString('pt-BR')}
+                        {eosFusion 
+                          ? eosFusion.eos.toLocaleDateString('pt-BR')
+                          : agroData?.eosDate 
+                            ? new Date(agroData.eosDate).toLocaleDateString('pt-BR')
+                            : '---'
+                        }
                       </span>
                     </span>
                   )}
@@ -526,6 +1102,22 @@ export default function ReportPage() {
           </Card>
         )}
 
+        {/* Tabs de Dados */}
+        <AnalysisTabs
+          featureFlags={featureFlags}
+          precipitationData={precipitationData}
+          harvestWindow={harvestWindow}
+          harvestAdjustment={harvestAdjustment}
+          waterBalanceData={waterBalanceData}
+          eosAdjustment={eosAdjustment}
+          thermalData={thermalData}
+          climateEnvelopeData={climateEnvelopeData}
+          soilData={soilData}
+          satelliteSchedule={satelliteSchedule}
+          fieldId={fieldId}
+          cropType={field?.cropType || 'SOJA'}
+        />
+
         {/* Template Selector */}
         <div>
           <h3 className="text-lg font-black text-slate-900 mb-4">Análises Disponíveis</h3>
@@ -552,6 +1144,58 @@ export default function ReportPage() {
         )}
     </div>
   )
+}
+
+// Helper function to format climate envelope data for chart
+function formatEnvelopeForChart(envelopeResult: any): any[] {
+  if (!envelopeResult?.envelope?.points) return []
+  
+  const currentYear = new Date().getFullYear()
+  const points = envelopeResult.envelope.points || []
+  const currentSeason = envelopeResult.currentSeason || []
+  
+  // Create a map of current season values by dayOfYear
+  const currentMap = new Map<number, number>()
+  for (const pt of currentSeason) {
+    const doy = pt.dayOfYear || getDayOfYear(pt.date)
+    currentMap.set(doy, pt.value)
+  }
+  
+  // Filter to only include days with current data (for the chart range)
+  const daysWithData = new Set(currentSeason.map((pt: any) => pt.dayOfYear || getDayOfYear(pt.date)))
+  
+  return points
+    .filter((p: any) => daysWithData.has(p.dayOfYear))
+    .map((p: any) => ({
+      date: getDateFromDayOfYear(p.dayOfYear, currentYear),
+      mean: p.mean,
+      upper: p.upper,
+      lower: p.lower,
+      current: currentMap.get(p.dayOfYear),
+      isAnomaly: currentMap.has(p.dayOfYear) && 
+        (currentMap.get(p.dayOfYear)! > p.upper || currentMap.get(p.dayOfYear)! < p.lower)
+    }))
+}
+
+function getDayOfYear(date: string | Date): number {
+  const d = typeof date === 'string' ? new Date(date) : date
+  const start = new Date(d.getFullYear(), 0, 0)
+  const diff = d.getTime() - start.getTime()
+  const oneDay = 1000 * 60 * 60 * 24
+  return Math.floor(diff / oneDay)
+}
+
+function getDateFromDayOfYear(dayOfYear: number, year: number): string {
+  const date = new Date(year, 0, dayOfYear)
+  return date.toISOString().split('T')[0]
+}
+
+function getRiskLevel(summary: any): 'BAIXO' | 'MEDIO' | 'ALTO' | 'CRITICO' {
+  if (!summary) return 'BAIXO'
+  if (summary.extremeEvents >= 5) return 'CRITICO'
+  if (summary.extremeEvents >= 2 || Math.abs(summary.avgDeviation) > 2) return 'ALTO'
+  if (summary.daysAboveNormal + summary.daysBelowNormal > 10) return 'MEDIO'
+  return 'BAIXO'
 }
 
 function prepareChartData(ndviData: any[], historicalNdvi: any[][], agroData: any) {

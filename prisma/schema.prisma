@@ -16,7 +16,7 @@ model Workspace {
   logo     String? // URL do logo
   isActive Boolean @default(true)
 
-  // Configurações do workspace (JSON)
+  // Configurações do workspace (JSON) - Legacy, migrar para WorkspaceSettings
   settings String?
 
   // Limites e quotas
@@ -28,12 +28,66 @@ model Workspace {
   updatedAt DateTime @updatedAt
 
   // Relações
-  users          User[]
-  fields         Field[]
-  producers      Producer[]
-  logisticsUnits LogisticsUnit[]
+  users            User[]
+  fields           Field[]
+  producers        Producer[]
+  logisticsUnits   LogisticsUnit[]
+  featureSettings  WorkspaceSettings?
 
   @@index([slug])
+}
+
+// ==================== FEATURE FLAGS ====================
+
+model WorkspaceSettings {
+  id          String    @id @default(cuid())
+  workspaceId String    @unique
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // ===== MÓDULOS DE DADOS =====
+  // Controla se o sistema busca e processa esses dados
+  enablePrecipitation    Boolean @default(true)   // Dados de precipitação
+  enableWaterBalance     Boolean @default(false)  // Balanço hídrico
+  enableRadarNdvi        Boolean @default(false)  // Sentinel-1 para gaps
+  enableThermalSum       Boolean @default(false)  // Soma térmica (GDD)
+  enableSoilData         Boolean @default(false)  // Dados de solo
+  enableClimateEnvelope  Boolean @default(false)  // Bandas históricas clima
+
+  // ===== VISUALIZAÇÕES =====
+  // Controla quais gráficos aparecem na UI
+  showPrecipitationChart Boolean @default(true)
+  showWaterBalanceChart  Boolean @default(false)
+  showRadarOverlay       Boolean @default(false)
+  showGddChart           Boolean @default(false)
+  showSoilInfo           Boolean @default(true)
+  showClimateEnvelope    Boolean @default(false)
+  showSatelliteSchedule  Boolean @default(true)   // Próximas passagens
+
+  // ===== CÁLCULOS AVANÇADOS =====
+  // Controla se algoritmos usam esses dados nos cálculos
+  useRadarForGaps        Boolean @default(false)  // Usar radar para preencher gaps NDVI
+  useGddForEos           Boolean @default(false)  // Usar GDD na projeção de EOS
+  useWaterBalanceAdjust  Boolean @default(false)  // Ajustar EOS por balanço hídrico
+  usePrecipitationAdjust Boolean @default(true)   // Ajustar colheita por precipitação
+
+  // ===== AUTO-REPROCESSAMENTO =====
+  enableAutoReprocess      Boolean @default(false)           // Habilitar reprocessamento automático
+  autoReprocessFrequency   String  @default("ON_NEW_DATA")   // ON_NEW_DATA | DAILY | WEEKLY
+  autoReprocessNotify      Boolean @default(true)            // Notificar por email
+  autoReprocessWebhookUrl  String?                           // URL do webhook (opcional)
+
+  // ===== CONFIGURAÇÕES GERAIS =====
+  distanceCalculationMethod String @default("straight_line") // straight_line | road_distance
+  googleMapsApiKey          String?                          // Chave API Google Maps
+
+  // ===== CREDENCIAIS EXTERNAS =====
+  // Copernicus Data Space (para Sentinel-1 radar)
+  copernicusClientId        String?                          // OAuth2 Client ID
+  copernicusClientSecret    String?                          // OAuth2 Client Secret (criptografado)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model User {
@@ -234,11 +288,63 @@ model Field {
   analyses Analysis[]
   ndviData NdviDataPoint[]
   logisticsDistances FieldLogisticsDistance[]
+  dataStatus FieldDataStatus?
 
   @@index([workspaceId])
   @@index([workspaceId, status])
   @@index([producerId])
   @@index([logisticsUnitId])
+}
+
+// ==================== STATUS DE DADOS DO TALHÃO ====================
+
+model FieldDataStatus {
+  id      String @id @default(cuid())
+  fieldId String @unique
+  field   Field  @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  // Sentinel-2 (NDVI Óptico)
+  lastS2Acquisition DateTime?  // Última data com dados S2
+  nextS2Expected    DateTime?  // Próxima passagem esperada
+  s2DataAvailable   Boolean    @default(false)
+
+  // Sentinel-1 (Radar)
+  lastS1Acquisition DateTime?
+  nextS1Expected    DateTime?
+  s1DataAvailable   Boolean    @default(false)
+
+  // Status de dados adicionais
+  lastPrecipData    DateTime?  // Última data com precipitação
+  lastTempData      DateTime?  // Última data com temperatura
+
+  // Status de reprocessamento
+  needsReprocessing    Boolean   @default(false)
+  reprocessReason      String?   // Motivo do reprocessamento
+  lastProcessedAt      DateTime?
+  autoReprocessEnabled Boolean   @default(false)
+  lastReprocessTrigger String?   // MANUAL | AUTO_CRON | WEBHOOK | NEW_DATA
+
+  // Qualidade dos dados
+  dataCompleteness     Float?    // % de dias com dados no período
+  gapsFilledByRadar    Int       @default(0)  // Quantos gaps preenchidos por radar
+
+  // Status das Fontes de Dados (para graceful degradation badges)
+  precipitationStatus  String?   // SUCCESS | PARTIAL | UNAVAILABLE
+  precipitationMessage String?
+  waterBalanceStatus   String?
+  waterBalanceMessage  String?
+  radarStatus          String?
+  radarMessage         String?
+  temperatureStatus    String?
+  temperatureMessage   String?
+  soilStatus           String?
+  soilMessage          String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([needsReprocessing, autoReprocessEnabled])
 }
 
 // ==================== DADOS AGRONÔMICOS (BASE) ====================
@@ -384,3 +490,4 @@ model NdviDataPoint {
   @@unique([fieldId, date, seasonYear])
   @@index([fieldId, date])
 }
+
