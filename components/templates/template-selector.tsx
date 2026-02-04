@@ -1,7 +1,8 @@
 'use client'
 
-import { Shield, Truck, AlertTriangle, Loader2, Check } from 'lucide-react'
+import { Shield, Truck, AlertTriangle, Loader2, Check, Lock } from 'lucide-react'
 import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
 interface Template {
@@ -48,6 +49,9 @@ const colorMap: Record<string, { bg: string; border: string; text: string; shado
   }
 }
 
+// Templates disponíveis - apenas LOGISTICS está liberado
+const AVAILABLE_TEMPLATES = ['LOGISTICS']
+
 export function TemplateSelector({
   templates,
   selectedTemplate,
@@ -63,20 +67,33 @@ export function TemplateSelector({
         const isSelected = selectedTemplate === template.id
         const isAnalyzed = analyzedTemplates.includes(template.id)
         const isCurrentlyAnalyzing = analyzingTemplate === template.id
+        const isLocked = !AVAILABLE_TEMPLATES.includes(template.id)
 
         return (
           <Card
             key={template.id}
-            onClick={() => !isAnalyzing && onSelect(template.id)}
+            onClick={() => !isAnalyzing && !isLocked && onSelect(template.id)}
             className={cn(
-              'p-5 cursor-pointer transition-all relative overflow-hidden',
-              isSelected && `${colors.border} ${colors.bg} shadow-lg ${colors.shadow}`,
-              !isSelected && 'hover:border-slate-300 hover:shadow-md',
+              'p-5 transition-all relative overflow-hidden',
+              isLocked && 'opacity-60 cursor-not-allowed',
+              !isLocked && 'cursor-pointer',
+              isSelected && !isLocked && `${colors.border} ${colors.bg} shadow-lg ${colors.shadow}`,
+              !isSelected && !isLocked && 'hover:border-slate-300 hover:shadow-md',
               isAnalyzing && !isCurrentlyAnalyzing && 'opacity-50 cursor-not-allowed'
             )}
           >
-            {/* Badge de status */}
-            {isAnalyzed && !isCurrentlyAnalyzing && (
+            {/* Badge "Em Breve" para templates bloqueados */}
+            {isLocked && (
+              <div className="absolute top-3 right-3">
+                <Badge className="bg-slate-200 text-slate-600 text-[10px] font-bold">
+                  <Lock size={10} className="mr-1" />
+                  Em Breve
+                </Badge>
+              </div>
+            )}
+
+            {/* Badge de status para templates disponíveis */}
+            {!isLocked && isAnalyzed && !isCurrentlyAnalyzing && (
               <div className="absolute top-3 right-3">
                 <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
                   <Check size={12} className="text-white" />
@@ -84,7 +101,7 @@ export function TemplateSelector({
               </div>
             )}
 
-            {isCurrentlyAnalyzing && (
+            {!isLocked && isCurrentlyAnalyzing && (
               <div className="absolute top-3 right-3">
                 <Loader2 size={18} className="animate-spin text-slate-400" />
               </div>
@@ -92,24 +109,35 @@ export function TemplateSelector({
 
             <div className={cn(
               'w-12 h-12 rounded-xl flex items-center justify-center mb-3',
-              colors.bg,
-              colors.text
+              isLocked ? 'bg-slate-100 text-slate-400' : colors.bg,
+              !isLocked && colors.text
             )}>
               {iconMap[template.icon] || <Shield size={24} />}
             </div>
 
-            <h4 className="font-bold text-slate-800">{template.name}</h4>
+            <h4 className={cn(
+              'font-bold',
+              isLocked ? 'text-slate-500' : 'text-slate-800'
+            )}>
+              {template.name}
+            </h4>
             <p className="text-xs text-slate-500 mt-1">{template.description}</p>
 
-            {isAnalyzed && !isCurrentlyAnalyzing && (
+            {!isLocked && isAnalyzed && !isCurrentlyAnalyzing && (
               <p className="text-[10px] font-bold text-emerald-600 mt-3 uppercase">
                 Análise disponível
               </p>
             )}
 
-            {!isAnalyzed && !isCurrentlyAnalyzing && (
+            {!isLocked && !isAnalyzed && !isCurrentlyAnalyzing && (
               <p className="text-[10px] font-bold text-slate-400 mt-3 uppercase">
                 Clique para analisar
+              </p>
+            )}
+
+            {isLocked && (
+              <p className="text-[10px] font-bold text-slate-400 mt-3 uppercase">
+                Disponível em breve
               </p>
             )}
           </Card>
