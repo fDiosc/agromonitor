@@ -323,6 +323,7 @@ export default function ReportPage() {
   const [thermalData, setThermalData] = useState<any>(null)
   const [soilData, setSoilData] = useState<any>(null)
   const [climateEnvelopeData, setClimateEnvelopeData] = useState<any>(null)
+  const [radarData, setRadarData] = useState<any>(null)
   const [featureFlags, setFeatureFlags] = useState<any>(null)
   const [satelliteSchedule, setSatelliteSchedule] = useState<any>(null)
   const [eosFusion, setEosFusion] = useState<EosFusionResult | null>(null)
@@ -408,6 +409,14 @@ export default function ReportPage() {
             }
             setClimateEnvelopeData(parsed)
           }
+          
+          // Parse radar data
+          if (areaData.radar) {
+            const radar = typeof areaData.radar === 'string'
+              ? JSON.parse(areaData.radar)
+              : areaData.radar
+            setRadarData(radar)
+          }
         } catch {
           // Silently handle parsing errors
           setHarvestAdjustment(null)
@@ -415,6 +424,7 @@ export default function ReportPage() {
           setEosAdjustment(null)
           setThermalData(null)
           setClimateEnvelopeData(null)
+          setRadarData(null)
         }
       }
 
@@ -557,8 +567,29 @@ export default function ReportPage() {
             nextS2.setDate(nextS2.getDate() + s2RevisitDays)
           }
           
+          // Extrair último dado de radar do rawAreaData
+          let lastRadarDate: string | null = null
+          if (agroData?.rawAreaData) {
+            try {
+              const areaDataForRadar = JSON.parse(agroData.rawAreaData)
+              if (areaDataForRadar.radar) {
+                const radarParsed = typeof areaDataForRadar.radar === 'string' 
+                  ? JSON.parse(areaDataForRadar.radar) 
+                  : areaDataForRadar.radar
+                if (radarParsed.scenes && radarParsed.scenes.length > 0) {
+                  // Ordenar cenas por data e pegar a mais recente
+                  const sortedScenes = [...radarParsed.scenes].sort((a: any, b: any) => 
+                    new Date(b.date || b.datetime).getTime() - new Date(a.date || a.datetime).getTime()
+                  )
+                  lastRadarDate = sortedScenes[0]?.date || sortedScenes[0]?.datetime || null
+                }
+              }
+            } catch { /* ignore */ }
+          }
+          
           // Loop até encontrar a próxima passagem S1 que seja >= hoje
-          const nextS1 = new Date(lastDate)
+          const lastS1 = lastRadarDate ? new Date(lastRadarDate) : lastDate
+          const nextS1 = new Date(lastS1)
           while (nextS1 <= today) {
             nextS1.setDate(nextS1.getDate() + s1RevisitDays)
           }
@@ -599,7 +630,7 @@ export default function ReportPage() {
           setSatelliteSchedule({
             lastS2Date: lastNdviDate,
             nextS2Date: nextS2.toISOString(),
-            lastS1Date: null, // Radar not yet integrated
+            lastS1Date: lastRadarDate,
             nextS1Date: nextS1.toISOString(),
             daysUntilNextData: Math.min(daysUntilS2, daysUntilS1),
             upcomingPasses

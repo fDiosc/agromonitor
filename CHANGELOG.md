@@ -22,6 +22,22 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.22] - 2026-02-04
+
+### Correções de Exibição de Dados
+
+**Precipitação - "Últimos 10 dias"**:
+- Corrigido bug que fazia o valor não aparecer na UI
+- O `harvestAdjustment` agora é sempre calculado (antes dependia de feature flag)
+- Métricas como `recentPrecipMm` e `grainQualityRisk` agora sempre disponíveis
+
+**Sentinel-1 "Não integrado" corrigido**:
+- Card de satélite agora mostra data do último dado de radar
+- Parsing dos dados de radar adicionado na página de relatório
+- Próxima passagem S1 calculada com base na última cena Sentinel-1
+
+---
+
 ## [0.0.21] - 2026-02-04
 
 ### Gráfico de Precipitação Aprimorado e Sentinel-1

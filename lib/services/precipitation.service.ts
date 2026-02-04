@@ -307,12 +307,16 @@ export async function getPrecipitationForField(
   // Buscar dados
   const precipData = await fetchPrecipitation(geometry, startDate, endDate)
   
-  // Calcular ajuste se temos data de colheita
+  // Calcular ajuste se temos data de colheita (sempre calcular, mas só aplicar delay se enabled)
   let adjustment: HarvestAdjustment | null = null
   if (harvestStart && precipData.source !== 'UNAVAILABLE') {
+    adjustment = calculateHarvestAdjustment(harvestStart, precipData)
+    
+    // Se ajuste de atraso não habilitado, zerar os dias de delay (mas manter outras métricas)
     const adjustEnabled = await isFeatureEnabled(workspaceId, 'usePrecipitationAdjust')
-    if (adjustEnabled) {
-      adjustment = calculateHarvestAdjustment(harvestStart, precipData)
+    if (!adjustEnabled && adjustment) {
+      adjustment.delayDays = 0
+      adjustment.reason = null
     }
   }
   
