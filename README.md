@@ -14,11 +14,14 @@ O **MERX AGRO Monitor** é uma plataforma multi-tenant que transforma dados de s
 - **Monitoramento de Talhões** - Cadastro e acompanhamento de áreas agrícolas
 - **Tipos de Cultura** - Suporte a Soja e Milho com ciclos diferenciados
 - **Detecção de Fenologia** - Identificação automática de plantio, emergência e colheita
+- **Fusão EOS (v0.0.19)** - Algoritmo científico combinando NDVI + GDD + Balanço Hídrico
 - **Curvas NDVI** - Visualização histórica e projeções com correlação
+- **Gráficos Avançados** - GDD, Envelope Climático, Balanço Hídrico, Precipitação
 - **Diagnóstico Logístico** - Visão consolidada para planejamento de recebimento
 - **Caixas Logísticas** - Gestão de armazéns com raio de cobertura
 - **Filtros Avançados** - Por status, caixa logística e tipo de atribuição
 - **Templates de Análise** - Crédito, Logística, Matriz de Risco
+- **Feature Flags** - Configuração de módulos por workspace
 
 ---
 
@@ -140,7 +143,14 @@ merx-agro-mvp/
 │   ├── version.ts              # Versão e changelog
 │   ├── prisma.ts               # Cliente Prisma
 │   └── services/               # Serviços de negócio
-│       ├── distance.service.ts # Cálculo de distâncias
+│       ├── eos-fusion.service.ts        # Fusão EOS (NDVI + GDD + Hídrico)
+│       ├── thermal.service.ts           # Soma térmica (GDD)
+│       ├── water-balance.service.ts     # Balanço hídrico
+│       ├── climate-envelope.service.ts  # Envelope climático histórico
+│       ├── precipitation.service.ts     # Dados de precipitação
+│       ├── feature-flags.service.ts     # Configuração de módulos
+│       ├── phenology.service.ts         # Cálculos fenológicos
+│       ├── distance.service.ts          # Cálculo de distâncias
 │       └── logistics-distance.service.ts # Persistência de distâncias
 ├── prisma/
 │   ├── schema.prisma           # Schema do banco
@@ -157,9 +167,19 @@ merx-agro-mvp/
 | [README.md](./README.md) | Este documento - visão geral | ✅ Atualizado |
 | [CHANGELOG.md](./CHANGELOG.md) | Histórico de mudanças | ✅ Atualizado |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Arquitetura detalhada | ✅ Atualizado |
-| [METHODOLOGY.md](./METHODOLOGY.md) | Metodologias técnicas | ✅ Atualizado |
+| [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md) | **Metodologia V2** - Fusão EOS, GDD, Envelope Climático | ✅ Atualizado |
+| [METHODOLOGY.md](./METHODOLOGY.md) | Metodologias técnicas (legado) | 📦 Legado |
 | [DIAGNOSTICOLOG.md](./DIAGNOSTICOLOG.md) | Especificação módulo logístico | ✅ Atualizado |
 | [REFATORACAO1.md](./REFATORACAO1.md) | Plano de multi-tenancy e auth | ✅ Concluído |
+
+### Documentos Técnicos (pasta /docs)
+
+| Documento | Descrição | Status |
+|-----------|-----------|--------|
+| [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md) | Metodologia V2 - Fusão EOS científica | ✅ Atualizado |
+| [docs/PLAN-HYBRID-ANALYSIS.md](./docs/PLAN-HYBRID-ANALYSIS.md) | Plano de análise híbrida | ✅ Concluído |
+| [docs/PLAN-REPROCESS-ANALYSIS.md](./docs/PLAN-REPROCESS-ANALYSIS.md) | Plano de reprocessamento | ✅ Concluído |
+| [docs/PLAN-ZARC-ALIGNMENT.md](./docs/PLAN-ZARC-ALIGNMENT.md) | Alinhamento ZARC | ✅ Concluído |
 
 ### Documentos Legados (raiz do projeto)
 
@@ -293,6 +313,30 @@ Sistema extensível de análises:
 - **Crédito**: Avaliação de garantias e CPRs
 - **Logística**: Previsão de colheita e transporte
 - **Matriz de Risco**: Visão consolidada de riscos
+
+### 7. Fusão EOS (Previsão de Colheita Avançada)
+
+Algoritmo científico para previsão de data de colheita:
+
+**Fontes de Dados Combinadas:**
+- **NDVI Histórico**: Correlação com safras anteriores
+- **Soma Térmica (GDD)**: Growing Degree Days para maturidade fisiológica
+- **Balanço Hídrico**: Ajuste por estresse (acelera senescência)
+
+**Metodologias Científicas:**
+| Referência | Aplicação |
+|------------|-----------|
+| PhenoCrop (Sakamoto 2020) | 77% acurácia milho, 71% soja |
+| Kumudini 2021 | 85% redução NDVI = maturidade |
+| Mourtzinis 2017 | GDD por grupo de maturidade |
+| Desclaux 2003 | Estresse hídrico acelera colheita |
+
+**Interface:**
+- Tooltip interativo com método e confiança
+- Comparativo NDVI vs GDD em tempo real
+- Alertas de divergência automáticos
+
+> Documentação completa: [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md)
 
 ---
 
