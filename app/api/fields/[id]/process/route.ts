@@ -10,6 +10,7 @@ import { getWaterBalanceForField, serializeWaterBalance } from '@/lib/services/w
 import { getThermalDataForField, serializeThermalData } from '@/lib/services/thermal.service'
 import { getClimateEnvelopeForField, serializeClimateEnvelope } from '@/lib/services/climate-envelope.service'
 import { getS1DataForField, serializeS1Data } from '@/lib/services/sentinel1.service'
+import { getFusedNdviForField, serializeFusionResult, calculateFusionQuality, FusionResult } from '@/lib/services/ndvi-fusion.service'
 
 interface RouteParams {
   params: { id: string }
@@ -297,11 +298,76 @@ export async function POST(
             console.log('[PROCESS] Sentinel-1 Radar:', {
               scenes: radarResult.scenes.length,
               rviPoints: radarResult.rviTimeSeries.length,
+              dataPoints: radarResult.data.length,
               source: radarResult.source
             })
           }
         } catch (radarError) {
           console.warn('[PROCESS] Erro ao buscar dados Sentinel-1 (continuando):', radarError)
+        }
+      }
+
+      // =======================================================
+      // FUSÃO NDVI ÓPTICO + RADAR (se feature habilitada e dados disponíveis)
+      // =======================================================
+      let fusionData: string | null = null
+      let fusionMetrics: { gapsFilled: number, maxGapDays: number, radarContribution: number, continuityScore: number } | null = null
+      
+      if (field.workspaceId && radarData) {
+        try {
+          const radarParsed = JSON.parse(radarData)
+          
+          // Converter NDVI do Merx para formato do serviço de fusão
+          const opticalData = merxReport.ndvi.map((pt: any) => ({
+            date: pt.date,
+            ndvi: pt.ndvi_smooth || pt.ndvi_raw || pt.ndvi_interp,
+            cloudCover: pt.cloud_cover
+          }))
+          
+          // Executar fusão
+          const fusionResult = await getFusedNdviForField(
+            field.workspaceId,
+            opticalData,
+            radarParsed.rviTimeSeries || [],
+            field.cropType || 'SOJA'
+          )
+          
+          if (fusionResult && fusionResult.gapsFilled > 0) {
+            fusionData = serializeFusionResult(fusionResult)
+            
+            // Calcular métricas de qualidade
+            const quality = calculateFusionQuality(fusionResult)
+            
+            // Calcular maior gap (para cálculo de confiança)
+            const sortedPoints = fusionResult.points
+              .map(p => new Date(p.date).getTime())
+              .sort((a, b) => a - b)
+            
+            let maxGapDays = 0
+            for (let i = 0; i < sortedPoints.length - 1; i++) {
+              const gap = (sortedPoints[i + 1] - sortedPoints[i]) / (1000 * 60 * 60 * 24)
+              maxGapDays = Math.max(maxGapDays, gap)
+            }
+            
+            fusionMetrics = {
+              gapsFilled: fusionResult.gapsFilled,
+              maxGapDays,
+              radarContribution: quality.radarContribution,
+              continuityScore: quality.continuityScore
+            }
+            
+            console.log('[PROCESS] NDVI Fusion:', {
+              opticalPoints: fusionResult.opticalPoints,
+              radarPoints: fusionResult.radarPoints,
+              gapsFilled: fusionResult.gapsFilled,
+              maxGapDays,
+              method: fusionResult.fusionMethod
+            })
+          } else {
+            console.log('[PROCESS] Fusion not executed or no gaps to fill')
+          }
+        } catch (fusionError) {
+          console.warn('[PROCESS] Erro na fusão NDVI (continuando):', fusionError)
         }
       }
 
@@ -329,7 +395,7 @@ export async function POST(
           rawPrecipData: precipitationData || JSON.stringify(merxReport.precipitacao),
           rawSoilData: JSON.stringify(merxReport.solo),
           rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
-          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData }),
+          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData, fusion: fusionData, fusionMetrics }),
           rawZarcData: JSON.stringify(complementary.zarc_anual),
           zarcWindowStart: zarcAnalysis.window?.windowStart || null,
           zarcWindowEnd: zarcAnalysis.window?.windowEnd || null,
@@ -362,7 +428,7 @@ export async function POST(
           rawPrecipData: precipitationData || JSON.stringify(merxReport.precipitacao),
           rawSoilData: JSON.stringify(merxReport.solo),
           rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
-          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData }),
+          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData, fusion: fusionData, fusionMetrics }),
           rawZarcData: JSON.stringify(complementary.zarc_anual),
           zarcWindowStart: zarcAnalysis.window?.windowStart || null,
           zarcWindowEnd: zarcAnalysis.window?.windowEnd || null,

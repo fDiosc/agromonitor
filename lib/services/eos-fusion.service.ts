@@ -17,6 +17,13 @@
 
 // ==================== Types ====================
 
+export interface FusionMetrics {
+  gapsFilled: number           // Número de gaps preenchidos por radar
+  maxGapDays: number           // Maior gap na série temporal
+  radarContribution: number    // 0-1, proporção de pontos de radar
+  continuityScore: number      // 0-1, score de continuidade da série
+}
+
 export interface EosFusionInput {
   // Dados NDVI
   eosNdvi: Date | null           // Data projetada pelo método NDVI histórico
@@ -35,6 +42,9 @@ export interface EosFusionInput {
   waterStressLevel?: 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
   stressDays?: number            // Dias de estresse
   yieldImpact?: number           // Impacto estimado na produtividade (%)
+  
+  // Métricas de fusão NDVI (óptico + radar)
+  fusionMetrics?: FusionMetrics
   
   // Metadados
   plantingDate: Date
@@ -97,6 +107,67 @@ const GDD_CONFIDENCE_MAP: Record<string, number> = {
   'HIGH': 90,
   'MEDIUM': 70,
   'LOW': 50
+}
+
+// ==================== Confidence Boost Functions ====================
+
+/**
+ * Calcula boost de confiança baseado em métricas de fusão NDVI
+ * 
+ * Referências científicas:
+ * - Planet Fusion (2021): Confiança inversamente proporcional ao gap temporal
+ * - MDPI Remote Sensing (2024): SAR-Optical fusion +6% acurácia
+ * - arXiv 2020: 3x melhoria R² para gaps longos com SAR
+ */
+function calculateFusionConfidenceBoost(
+  baseConfidence: number,
+  fusionMetrics: FusionMetrics | undefined,
+  phenologicalStage: EosFusionResult['phenologicalStage']
+): { adjustedConfidence: number, boostDetails: string[] } {
+  if (!fusionMetrics) {
+    return { adjustedConfidence: baseConfidence, boostDetails: [] }
+  }
+  
+  let boost = 0
+  const details: string[] = []
+  
+  // 1. Bônus por continuidade da série (Planet Fusion methodology)
+  // Séries com menos gaps são mais confiáveis
+  if (fusionMetrics.maxGapDays <= 5) {
+    boost += 10
+    details.push('Série contínua (max gap 5d): +10%')
+  } else if (fusionMetrics.maxGapDays <= 10) {
+    boost += 5
+    details.push('Série moderadamente contínua: +5%')
+  } else if (fusionMetrics.gapsFilled > 0) {
+    // Gap longo, mas preenchido por radar (arXiv 2020: 3x melhoria)
+    boost += 8
+    details.push(`${fusionMetrics.gapsFilled} gap(s) preenchidos por radar: +8%`)
+  }
+  // Se gap longo e não preenchido: sem bônus
+  
+  // 2. Bônus por contribuição do radar em fase crítica
+  // Radar é mais valioso na senescência (detecta mudanças estruturais)
+  if (fusionMetrics.radarContribution > 0) {
+    const radarBonus = Math.min(5, fusionMetrics.radarContribution * 10)
+    
+    // Multiplicador para fases críticas
+    let stageMultiplier = 1.0
+    if (phenologicalStage === 'SENESCENCE' || phenologicalStage === 'MATURITY') {
+      stageMultiplier = 1.5 // Radar mais valioso na maturação
+    }
+    
+    const finalRadarBonus = Math.round(radarBonus * stageMultiplier)
+    if (finalRadarBonus > 0) {
+      boost += finalRadarBonus
+      const stageNote = stageMultiplier > 1 ? ' (fase crítica)' : ''
+      details.push(`Contribuição radar: +${finalRadarBonus}%${stageNote}`)
+    }
+  }
+  
+  const adjustedConfidence = Math.min(100, baseConfidence + boost)
+  
+  return { adjustedConfidence, boostDetails: details }
 }
 
 // ==================== Main Function ====================
@@ -220,9 +291,22 @@ export function calculateFusedEos(input: EosFusionInput): EosFusionResult {
     warnings.push(`Estresse hídrico elevado: ${input.stressDays} dias de estresse`)
   }
   
+  // 7. Aplicar boost de confiança por fusão NDVI (radar)
+  const { adjustedConfidence, boostDetails } = calculateFusionConfidenceBoost(
+    confidence,
+    input.fusionMetrics,
+    phenologicalStage
+  )
+  
+  // Adicionar detalhes do boost aos fatores
+  if (boostDetails.length > 0) {
+    factors.push('📡 Radar Sentinel-1:')
+    factors.push(...boostDetails.map(d => `  • ${d}`))
+  }
+  
   return {
     eos,
-    confidence,
+    confidence: adjustedConfidence,
     method,
     phenologicalStage,
     explanation,

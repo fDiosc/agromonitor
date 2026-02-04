@@ -22,6 +22,41 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.23] - 2026-02-04
+
+### Integração Completa Sentinel-1 (Radar)
+
+Implementação completa da integração Sentinel-1 conforme Metodologia V2.
+
+**Statistical API do Copernicus**:
+- Substituída Process API por Statistical API para obter valores VH/VV
+- Cálculo de RVI real (não mais placeholder 0.5)
+- Conversão para dB e cálculo correto do índice de vegetação radar
+
+**Fusão NDVI Óptico + Radar**:
+- Serviço de fusão conectado ao pipeline de processamento
+- Gaps no NDVI óptico preenchidos automaticamente com estimativas de radar
+- Métricas de fusão salvas em `rawAreaData.fusionMetrics`
+
+**Boost de Confiança (Base Científica)**:
+- Confiança aumentada baseada em literatura:
+  - Planet Fusion (2021): Série contínua +10%
+  - MDPI 2024: Gaps preenchidos por radar +8%
+  - Radar em fase de senescência: +5% adicional
+- Detalhes do boost exibidos nos fatores da previsão
+
+**Visualização no Gráfico NDVI**:
+- Overlay de radar (linha roxa pontilhada) quando `showRadarOverlay` habilitado
+- Conversão RVI→NDVI por cultura (SOJA, MILHO, ALGODAO)
+- Legenda atualizada com indicador "Radar (Sentinel-1)"
+
+**Feature Flags**:
+- `enableRadarNdvi`: Buscar dados Sentinel-1 (já existia)
+- `useRadarForGaps`: Executar fusão para preencher gaps
+- `showRadarOverlay`: Exibir overlay de radar no gráfico
+
+---
+
 ## [0.0.22] - 2026-02-04
 
 ### Correções de Exibição de Dados

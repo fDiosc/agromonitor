@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { MetricCards } from '@/components/agro/metric-cards'
@@ -520,6 +520,17 @@ export default function ReportPage() {
           } catch {}
         }
         
+        // Extract fusion metrics from areaData (if available)
+        let fusionMetricsForEos: { gapsFilled: number, maxGapDays: number, radarContribution: number, continuityScore: number } | undefined
+        if (agroData?.rawAreaData) {
+          try {
+            const areaDataForFusion = JSON.parse(agroData.rawAreaData)
+            if (areaDataForFusion.fusionMetrics) {
+              fusionMetricsForEos = areaDataForFusion.fusionMetrics
+            }
+          } catch { /* ignore */ }
+        }
+        
         // Calculate fusion
         if (agroData?.eosDate || eosGdd) {
           const fusionInput: EosFusionInput = {
@@ -535,6 +546,7 @@ export default function ReportPage() {
             waterStressLevel,
             stressDays,
             yieldImpact,
+            fusionMetrics: fusionMetricsForEos,
             plantingDate: agroData?.plantingDate ? new Date(agroData.plantingDate) : new Date(),
             cropType: fieldData.field?.cropType || 'SOJA'
           }
@@ -761,9 +773,39 @@ export default function ReportPage() {
   const selectedTemplateConfig = templates.find(t => t.id === selectedTemplate)
 
   // Use os dados de overlay se disponíveis, senão prepare do jeito antigo
-  const chartData = chartOverlayData.length > 0 
+  const baseChartData = chartOverlayData.length > 0 
     ? chartOverlayData 
     : prepareChartData(ndviData, historicalNdvi, agroData)
+  
+  // Enriquecer chartData com dados de radar (se disponíveis e flag habilitada)
+  const chartData = useMemo(() => {
+    if (!featureFlags?.showRadarOverlay || !radarData?.rviTimeSeries?.length) {
+      return baseChartData
+    }
+    
+    // Modelo de conversão RVI -> NDVI (mesmo usado no backend)
+    // NDVI = a * RVI + b (SOJA: a=1.15, b=-0.15)
+    const cropType = field?.cropType || 'SOJA'
+    const params: Record<string, { a: number, b: number }> = {
+      'SOJA': { a: 1.15, b: -0.15 },
+      'MILHO': { a: 1.10, b: -0.12 },
+      'ALGODAO': { a: 1.20, b: -0.18 }
+    }
+    const { a, b } = params[cropType] || { a: 1.12, b: -0.14 }
+    
+    // Criar mapa de datas -> radarNdvi
+    const radarMap = new Map<string, number>()
+    for (const pt of radarData.rviTimeSeries) {
+      const ndviEstimate = Math.max(0, Math.min(1, a * pt.rvi + b))
+      radarMap.set(pt.date, ndviEstimate)
+    }
+    
+    // Adicionar radarNdvi aos pontos existentes
+    return baseChartData.map((pt: any) => {
+      const radarNdvi = radarMap.get(pt.date)
+      return radarNdvi !== undefined ? { ...pt, radarNdvi } : pt
+    })
+  }, [baseChartData, radarData, featureFlags?.showRadarOverlay, field?.cropType])
   
   // Calcular informações do ciclo para exibição
   const hasHistoricalCycles = (cycleAnalysis?.historicalCycles?.length ?? 0) > 0
@@ -1082,6 +1124,20 @@ export default function ReportPage() {
                     name="Projeção"
                     connectNulls
                   />
+                  
+                  {/* Radar NDVI overlay - when enabled and data available */}
+                  {featureFlags?.showRadarOverlay && radarData?.rviTimeSeries?.length > 0 && (
+                    <Line 
+                      type="monotone" 
+                      dataKey="radarNdvi" 
+                      stroke="#8b5cf6" 
+                      strokeWidth={2} 
+                      dot={{ fill: '#8b5cf6', r: 3 }}
+                      strokeDasharray="4 4" 
+                      name="Radar (S1)"
+                      connectNulls
+                    />
+                  )}
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -1100,6 +1156,14 @@ export default function ReportPage() {
                   <div className="flex items-center gap-2">
                     <div className="w-8 border-t-2 border-dashed border-amber-500"></div>
                     <span className="text-amber-600 font-medium">Projeção até Colheita</span>
+                  </div>
+                )}
+                
+                {/* Radar Sentinel-1 */}
+                {featureFlags?.showRadarOverlay && chartData.some((d: any) => d.radarNdvi !== undefined) && (
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 border-t-2 border-dashed border-violet-500"></div>
+                    <span className="text-violet-600 font-medium">Radar (Sentinel-1)</span>
                   </div>
                 )}
                 

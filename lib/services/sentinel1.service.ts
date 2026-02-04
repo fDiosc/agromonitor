@@ -41,7 +41,7 @@ export interface CopernicusAuth {
 
 const COPERNICUS_TOKEN_URL = 'https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token'
 const SENTINEL_HUB_CATALOG = 'https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/search'
-const SENTINEL_HUB_PROCESS = 'https://sh.dataspace.copernicus.eu/api/v1/process'
+const SENTINEL_HUB_STATISTICAL = 'https://sh.dataspace.copernicus.eu/api/v1/statistics'
 
 // Cache de tokens por workspace
 const tokenCache = new Map<string, CopernicusAuth>()
@@ -232,54 +232,67 @@ async function searchS1Scenes(
 }
 
 /**
- * Processa cenas Sentinel-1 para obter valores de backscatter
- * Usando Statistical API para simplicidade
+ * Extrai polígono GeoJSON da geometria
  */
-async function processS1Data(
+function getPolygon(geometry: any): any | null {
+  try {
+    const geojson = typeof geometry === 'string' ? JSON.parse(geometry) : geometry
+    
+    if (geojson.type === 'FeatureCollection') {
+      return geojson.features[0]?.geometry || null
+    } else if (geojson.type === 'Feature') {
+      return geojson.geometry || null
+    } else if (geojson.type === 'Polygon' || geojson.type === 'MultiPolygon') {
+      return geojson
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Processa cenas Sentinel-1 usando Statistical API
+ * Retorna valores médios de VH e VV por data
+ */
+async function fetchS1Statistics(
   accessToken: string,
   geometry: any,
   startDate: Date,
   endDate: Date
 ): Promise<S1DataPoint[]> {
-  const bbox = getBbox(geometry)
-  if (!bbox) return []
+  const polygon = getPolygon(geometry)
+  if (!polygon) {
+    console.error('[SENTINEL1] Could not extract polygon from geometry')
+    return []
+  }
   
-  // Evalscript para obter VV e VH
+  // Evalscript para extrair VV e VH em dB
   const evalscript = `
 //VERSION=3
 function setup() {
   return {
     input: [{
       bands: ["VV", "VH"],
-      units: "dB"
+      units: "LINEAR_POWER"
     }],
     output: [
-      { id: "VV", bands: 1, sampleType: "FLOAT32" },
-      { id: "VH", bands: 1, sampleType: "FLOAT32" }
-    ],
-    mosaicking: "ORBIT"
+      { id: "vv_linear", bands: 1, sampleType: "FLOAT32" },
+      { id: "vh_linear", bands: 1, sampleType: "FLOAT32" }
+    ]
   }
 }
 
-function evaluatePixel(samples) {
-  // Média de múltiplas órbitas
-  let vvSum = 0, vhSum = 0, count = 0
-  for (let s of samples) {
-    if (s.VV !== 0 && s.VH !== 0) {
-      vvSum += s.VV
-      vhSum += s.VH
-      count++
-    }
-  }
+function evaluatePixel(sample) {
   return {
-    VV: [count > 0 ? vvSum / count : 0],
-    VH: [count > 0 ? vhSum / count : 0]
+    vv_linear: [sample.VV],
+    vh_linear: [sample.VH]
   }
 }
 `
 
   try {
-    const response = await fetch(SENTINEL_HUB_PROCESS, {
+    const response = await fetch(SENTINEL_HUB_STATISTICAL, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -288,7 +301,7 @@ function evaluatePixel(samples) {
       body: JSON.stringify({
         input: {
           bounds: {
-            bbox,
+            geometry: polygon,
             properties: { crs: 'http://www.opengis.net/def/crs/EPSG/0/4326' }
           },
           data: [{
@@ -298,42 +311,86 @@ function evaluatePixel(samples) {
                 from: startDate.toISOString(),
                 to: endDate.toISOString()
               },
-              polarization: 'DV' // Dual VV+VH
+              mosaickingOrder: 'mostRecent',
+              polarization: 'DV'
             },
             processing: {
               backCoeff: 'GAMMA0_TERRAIN',
-              orthorectify: true,
-              demInstance: 'COPERNICUS'
+              orthorectify: true
             }
           }]
         },
-        output: {
-          width: 1,
-          height: 1,
-          responses: [
-            { identifier: 'VV', format: { type: 'image/tiff' } },
-            { identifier: 'VH', format: { type: 'image/tiff' } }
-          ]
+        aggregation: {
+          timeRange: {
+            from: startDate.toISOString(),
+            to: endDate.toISOString()
+          },
+          aggregationInterval: {
+            of: 'P1D'
+          },
+          evalscript,
+          resx: 10,
+          resy: 10
         },
-        evalscript
+        calculations: {
+          default: {}
+        }
       }),
       signal: AbortSignal.timeout(120000)
     })
     
     if (!response.ok) {
-      console.error('[SENTINEL1] Process API failed:', response.status)
+      const errorText = await response.text()
+      console.error('[SENTINEL1] Statistical API failed:', response.status, errorText.substring(0, 200))
       return []
     }
     
-    // Para simplicidade, retornamos dados por cena (usando catalog dates)
-    // Em produção, usaríamos Statistical API para série temporal
-    console.log('[SENTINEL1] Process request successful')
+    const data = await response.json()
+    const dataPoints: S1DataPoint[] = []
     
-    // TODO: Parse multipart response para extrair valores
-    // Por agora, retornamos array vazio e usamos dados do catalog
-    return []
+    // Parse da resposta da Statistical API
+    const intervals = data.data || []
+    
+    for (const interval of intervals) {
+      const dateFrom = interval.interval?.from
+      if (!dateFrom) continue
+      
+      const date = dateFrom.split('T')[0]
+      const outputs = interval.outputs || {}
+      
+      // Extrair valores médios de VV e VH (em linear power)
+      const vvStats = outputs.vv_linear?.bands?.B0?.stats
+      const vhStats = outputs.vh_linear?.bands?.B0?.stats
+      
+      if (vvStats?.mean !== undefined && vhStats?.mean !== undefined) {
+        // Converter de linear power para dB: dB = 10 * log10(linear)
+        const vvLin = vvStats.mean
+        const vhLin = vhStats.mean
+        
+        // Evitar log de zero
+        if (vvLin > 0 && vhLin > 0) {
+          const vvDb = 10 * Math.log10(vvLin)
+          const vhDb = 10 * Math.log10(vhLin)
+          const rvi = calculateRVI(vhDb, vvDb)
+          
+          dataPoints.push({
+            date,
+            vv: vvDb,
+            vh: vhDb,
+            rvi,
+            vhVvRatio: vhLin / vvLin
+          })
+        }
+      }
+    }
+    
+    console.log('[SENTINEL1] Statistical API returned', dataPoints.length, 'data points')
+    
+    return dataPoints.sort((a, b) => 
+      new Date(a.date).getTime() - new Date(b.date).getTime()
+    )
   } catch (error) {
-    console.error('[SENTINEL1] Error processing data:', error)
+    console.error('[SENTINEL1] Error fetching statistics:', error)
     return []
   }
 }
@@ -369,7 +426,7 @@ export async function getS1DataForField(
     }
   }
   
-  // Buscar cenas disponíveis
+  // Buscar cenas disponíveis (para metadata)
   const scenes = await searchS1Scenes(accessToken, geometry, startDate, endDate)
   
   if (scenes.length === 0) {
@@ -383,23 +440,27 @@ export async function getS1DataForField(
     }
   }
   
-  // Por agora, retornamos apenas as cenas disponíveis
-  // A integração completa do Process API requer mais trabalho
-  // (parsing de resposta multipart, agregação por data, etc.)
+  // Buscar dados estatísticos reais via Statistical API
+  const dataPoints = await fetchS1Statistics(accessToken, geometry, startDate, endDate)
+  
+  // Construir série temporal de RVI
+  const rviTimeSeries = dataPoints.map(dp => ({
+    date: dp.date,
+    rvi: dp.rvi || 0
+  }))
   
   console.log('[SENTINEL1] Data fetch complete:', {
     scenes: scenes.length,
+    dataPoints: dataPoints.length,
+    rviPoints: rviTimeSeries.length,
     startDate: startDate.toISOString().split('T')[0],
     endDate: endDate.toISOString().split('T')[0]
   })
   
   return {
     scenes,
-    data: [],
-    rviTimeSeries: scenes.map(s => ({
-      date: s.date,
-      rvi: 0.5 // Placeholder - em produção, calcular RVI real
-    })),
+    data: dataPoints,
+    rviTimeSeries,
     source: 'API',
     fetchedAt: new Date()
   }
