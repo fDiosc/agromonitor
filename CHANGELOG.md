@@ -56,6 +56,8 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 - Nova seção 4.5 na Metodologia V2: Fusão de EOS
 - Referências científicas atualizadas (Sakamoto 2020, Kumudini 2021, Mourtzinis 2017, Desclaux 2003)
 - Thresholds de NDVI e algoritmo de seleção documentados
+- README atualizado com nova seção "Fusão EOS" e tabela de serviços
+- Tabela de documentação reorganizada com docs/METHODOLOGY-V2.md
 
 ---
 
