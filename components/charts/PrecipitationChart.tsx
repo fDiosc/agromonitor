@@ -4,6 +4,7 @@ import { useMemo } from 'react'
 import {
   ComposedChart,
   Bar,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -28,6 +29,8 @@ interface PrecipitationChartProps {
   rainyDays: number
   harvestStart?: string
   harvestEnd?: string
+  plantingDate?: string
+  sosDate?: string
   grainQualityRisk?: 'BAIXO' | 'MEDIO' | 'ALTO'
   recentPrecipMm?: number
   delayDays?: number
@@ -40,21 +43,35 @@ export function PrecipitationChart({
   rainyDays,
   harvestStart,
   harvestEnd,
+  plantingDate,
+  sosDate,
   grainQualityRisk,
   recentPrecipMm,
   delayDays
 }: PrecipitationChartProps) {
-  // Preparar dados para o gráfico
+  // Preparar dados para o gráfico com acumulado desde SOS (emergência)
   const chartData = useMemo(() => {
-    return data.map(point => ({
-      date: point.date,
-      precip: point.precipMm,
-      // Colorir baseado na intensidade
-      fill: point.precipMm > 20 ? '#3b82f6' : 
-            point.precipMm > 5 ? '#60a5fa' : 
-            point.precipMm > 0 ? '#93c5fd' : '#e2e8f0'
-    }))
-  }, [data])
+    let accumulated = 0
+    const sosTime = sosDate ? new Date(sosDate).getTime() : null
+    
+    return data.map(point => {
+      const pointTime = new Date(point.date).getTime()
+      // Só acumula a partir da emergência (SOS)
+      if (sosTime && pointTime >= sosTime) {
+        accumulated += point.precipMm
+      }
+      
+      return {
+        date: point.date,
+        precip: point.precipMm,
+        accumulated: sosTime && pointTime >= sosTime ? accumulated : null,
+        // Colorir baseado na intensidade
+        fill: point.precipMm > 20 ? '#3b82f6' : 
+              point.precipMm > 5 ? '#60a5fa' : 
+              point.precipMm > 0 ? '#93c5fd' : '#e2e8f0'
+      }
+    })
+  }, [data, sosDate])
 
   // Formatar data para exibição
   const formatDate = (dateStr: string) => {
@@ -148,9 +165,9 @@ export function PrecipitationChart({
         </div>
 
         {/* Gráfico */}
-        <div className="h-[200px] w-full">
+        <div className="h-[220px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 20, right: 10, left: 0, bottom: 0 }}>
+            <ComposedChart data={chartData} margin={{ top: 20, right: 50, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis 
                 dataKey="date" 
@@ -159,21 +176,71 @@ export function PrecipitationChart({
                 interval="preserveStartEnd"
               />
               <YAxis 
+                yAxisId="left"
                 tick={{ fontSize: 10, fill: '#94a3b8' }}
                 domain={[0, 'auto']}
                 label={{ 
-                  value: 'mm', 
+                  value: 'mm/dia', 
                   angle: -90, 
                   position: 'insideLeft',
                   style: { fontSize: 10, fill: '#94a3b8' }
                 }}
               />
+              <YAxis 
+                yAxisId="right"
+                orientation="right"
+                tick={{ fontSize: 10, fill: '#059669' }}
+                domain={[0, 'auto']}
+                label={{ 
+                  value: 'Acumulado', 
+                  angle: 90, 
+                  position: 'insideRight',
+                  style: { fontSize: 10, fill: '#059669' }
+                }}
+              />
               <Tooltip content={<CustomTooltip />} />
+              
+              {/* Linha de referência para plantio */}
+              {plantingDate && (
+                <ReferenceLine 
+                  x={plantingDate} 
+                  yAxisId="left"
+                  stroke="#8b5cf6" 
+                  strokeDasharray="5 5"
+                  strokeWidth={1.5}
+                >
+                  <Label 
+                    value="Plantio" 
+                    position="top" 
+                    fill="#8b5cf6" 
+                    fontSize={9}
+                  />
+                </ReferenceLine>
+              )}
+              
+              {/* Linha de referência para emergência (SOS) */}
+              {sosDate && (
+                <ReferenceLine 
+                  x={sosDate} 
+                  yAxisId="left"
+                  stroke="#22c55e" 
+                  strokeDasharray="5 5"
+                  strokeWidth={1.5}
+                >
+                  <Label 
+                    value="Emergência" 
+                    position="top" 
+                    fill="#22c55e" 
+                    fontSize={9}
+                  />
+                </ReferenceLine>
+              )}
               
               {/* Linha de referência para colheita */}
               {harvestStart && (
                 <ReferenceLine 
                   x={harvestStart} 
+                  yAxisId="left"
                   stroke="#dc2626" 
                   strokeDasharray="5 5"
                   strokeWidth={2}
@@ -182,23 +249,35 @@ export function PrecipitationChart({
                     value="Colheita" 
                     position="top" 
                     fill="#dc2626" 
-                    fontSize={10}
+                    fontSize={9}
                   />
                 </ReferenceLine>
               )}
               
               <Bar 
+                yAxisId="left"
                 dataKey="precip" 
                 fill="#3b82f6"
                 radius={[2, 2, 0, 0]}
                 maxBarSize={8}
+              />
+              
+              {/* Linha de precipitação acumulada desde emergência */}
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="accumulated"
+                stroke="#059669"
+                strokeWidth={2}
+                dot={false}
+                connectNulls={false}
               />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
 
         {/* Legenda */}
-        <div className="flex items-center justify-center gap-4 mt-4 text-xs text-slate-500">
+        <div className="flex flex-wrap items-center justify-center gap-4 mt-4 text-xs text-slate-500">
           <div className="flex items-center gap-1">
             <div className="w-3 h-3 rounded bg-blue-600"></div>
             <span>&gt;20mm (forte)</span>
@@ -210,6 +289,10 @@ export function PrecipitationChart({
           <div className="flex items-center gap-1">
             <div className="w-3 h-3 rounded bg-blue-200"></div>
             <span>&lt;5mm (fraca)</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-6 h-0.5 bg-emerald-600"></div>
+            <span>Acumulado</span>
           </div>
         </div>
 

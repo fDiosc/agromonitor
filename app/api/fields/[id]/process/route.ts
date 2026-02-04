@@ -9,6 +9,7 @@ import { getPrecipitationForField, serializePrecipitation } from '@/lib/services
 import { getWaterBalanceForField, serializeWaterBalance } from '@/lib/services/water-balance.service'
 import { getThermalDataForField, serializeThermalData } from '@/lib/services/thermal.service'
 import { getClimateEnvelopeForField, serializeClimateEnvelope } from '@/lib/services/climate-envelope.service'
+import { getS1DataForField, serializeS1Data } from '@/lib/services/sentinel1.service'
 
 interface RouteParams {
   params: { id: string }
@@ -273,6 +274,37 @@ export async function POST(
         }
       }
 
+      // =======================================================
+      // BUSCAR DADOS SENTINEL-1 / RADAR (se feature habilitada)
+      // =======================================================
+      let radarData: string | null = null
+      
+      if (field.workspaceId) {
+        try {
+          const geometry = JSON.parse(field.geometryJson)
+          const endDate = new Date()
+          
+          const radarResult = await getS1DataForField(
+            field.workspaceId,
+            geometry,
+            field.seasonStartDate,
+            endDate
+          )
+          
+          if (radarResult && radarResult.source !== 'UNAVAILABLE') {
+            radarData = serializeS1Data(radarResult)
+            
+            console.log('[PROCESS] Sentinel-1 Radar:', {
+              scenes: radarResult.scenes.length,
+              rviPoints: radarResult.rviTimeSeries.length,
+              source: radarResult.source
+            })
+          }
+        } catch (radarError) {
+          console.warn('[PROCESS] Erro ao buscar dados Sentinel-1 (continuando):', radarError)
+        }
+      }
+
       // Salvar ou atualizar AgroData
       await prisma.agroData.upsert({
         where: { fieldId: params.id },
@@ -297,7 +329,7 @@ export async function POST(
           rawPrecipData: precipitationData || JSON.stringify(merxReport.precipitacao),
           rawSoilData: JSON.stringify(merxReport.solo),
           rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
-          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData }),
+          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData }),
           rawZarcData: JSON.stringify(complementary.zarc_anual),
           zarcWindowStart: zarcAnalysis.window?.windowStart || null,
           zarcWindowEnd: zarcAnalysis.window?.windowEnd || null,
@@ -330,7 +362,7 @@ export async function POST(
           rawPrecipData: precipitationData || JSON.stringify(merxReport.precipitacao),
           rawSoilData: JSON.stringify(merxReport.solo),
           rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
-          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData }),
+          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData }),
           rawZarcData: JSON.stringify(complementary.zarc_anual),
           zarcWindowStart: zarcAnalysis.window?.windowStart || null,
           zarcWindowEnd: zarcAnalysis.window?.windowEnd || null,

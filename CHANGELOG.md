@@ -22,6 +22,24 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.21] - 2026-02-04
+
+### Gráfico de Precipitação Aprimorado e Sentinel-1
+
+**Gráfico de Precipitação**:
+- Corrigido cálculo de "Últimos 10 dias" que mostrava 0mm incorretamente
+- Agora calcula os 10 dias até hoje (se colheita é futura) ou até a colheita
+- Adicionada linha de precipitação acumulada desde emergência (SOS)
+- Adicionadas linhas pontilhadas de Plantio e Emergência (similar ao NDVI)
+- Segundo eixo Y para visualização do acumulado
+
+**Integração Sentinel-1**:
+- Adicionada chamada ao serviço Sentinel-1 no processamento de talhões
+- Dados de radar agora são salvos em `rawAreaData.radar`
+- Verificação de credenciais Copernicus funcionando corretamente
+
+---
+
 ## [0.0.20] - 2026-02-04
 
 ### Parsing Robusto de APIs Merx

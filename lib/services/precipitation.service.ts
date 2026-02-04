@@ -227,16 +227,28 @@ export function calculateHarvestAdjustment(
   harvestStart: Date,
   precipData: PrecipitationData
 ): HarvestAdjustment {
-  // Filtrar últimos 10 dias antes da colheita
+  const now = new Date()
   const harvestStartTime = harvestStart.getTime()
-  const tenDaysBefore = harvestStartTime - (10 * 24 * 60 * 60 * 1000)
+  const nowTime = now.getTime()
+  
+  // Se colheita é no futuro, calcular últimos 10 dias até hoje
+  // Se colheita já passou, calcular últimos 10 dias antes da colheita
+  const referenceTime = harvestStartTime > nowTime ? nowTime : harvestStartTime
+  const tenDaysBefore = referenceTime - (10 * 24 * 60 * 60 * 1000)
   
   const recentPoints = precipData.points.filter(p => {
     const pointTime = new Date(p.date).getTime()
-    return pointTime >= tenDaysBefore && pointTime <= harvestStartTime
+    return pointTime >= tenDaysBefore && pointTime <= referenceTime
   })
   
   const recentPrecipMm = recentPoints.reduce((sum, p) => sum + p.precipMm, 0)
+  
+  console.log('[PRECIP] Recent calculation:', {
+    referenceDate: new Date(referenceTime).toISOString().split('T')[0],
+    harvestDate: harvestStart.toISOString().split('T')[0],
+    pointsInWindow: recentPoints.length,
+    recentPrecipMm: recentPrecipMm.toFixed(1)
+  })
   
   let delayDays = 0
   let reason: string | null = null

@@ -54,6 +54,8 @@ interface AnalysisTabsProps {
   satelliteSchedule: any
   fieldId: string
   cropType: string
+  plantingDate?: string | null
+  sosDate?: string | null
 }
 
 function AnalysisTabs({
@@ -68,7 +70,9 @@ function AnalysisTabs({
   soilData,
   satelliteSchedule,
   fieldId,
-  cropType
+  cropType,
+  plantingDate,
+  sosDate
 }: AnalysisTabsProps) {
   // Determinar quais tabs mostrar
   const showClima = (
@@ -139,6 +143,8 @@ function AnalysisTabs({
                 rainyDays={precipitationData.rainyDays || 0}
                 harvestStart={harvestWindow?.startDate}
                 harvestEnd={harvestWindow?.endDate}
+                plantingDate={plantingDate ? new Date(plantingDate).toISOString().split('T')[0] : undefined}
+                sosDate={sosDate ? new Date(sosDate).toISOString().split('T')[0] : undefined}
                 grainQualityRisk={harvestAdjustment?.grainQualityRisk}
                 recentPrecipMm={harvestAdjustment?.recentPrecipMm}
                 delayDays={harvestAdjustment?.delayDays}
@@ -1116,6 +1122,8 @@ export default function ReportPage() {
           satelliteSchedule={satelliteSchedule}
           fieldId={fieldId}
           cropType={field?.cropType || 'SOJA'}
+          plantingDate={agroData?.plantingDate}
+          sosDate={agroData?.sosDate}
         />
 
         {/* Template Selector */}
