@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ArrowLeft, Loader2, TrendingUp, RefreshCw, CloudRain, Droplets, Satellite, Thermometer } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { ProcessingModal, DEFAULT_PROCESSING_STEPS, ProcessingStep } from '@/contexts/processing-context'
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -308,6 +309,11 @@ interface CycleAnalysis {
 export default function ReportPage() {
   const params = useParams()
   const fieldId = params.id as string
+  
+  // Estado local para modal de processamento
+  const [processingSteps, setProcessingSteps] = useState<ProcessingStep[]>([])
+  const [processingStartTime, setProcessingStartTime] = useState<Date | null>(null)
+  const [showProcessingModal, setShowProcessingModal] = useState(false)
 
   const [field, setField] = useState<any>(null)
   const [historicalNdvi, setHistoricalNdvi] = useState<any[][]>([])
@@ -327,6 +333,7 @@ export default function ReportPage() {
   const [featureFlags, setFeatureFlags] = useState<any>(null)
   const [satelliteSchedule, setSatelliteSchedule] = useState<any>(null)
   const [eosFusion, setEosFusion] = useState<EosFusionResult | null>(null)
+  const [isSarFusionActive, setIsSarFusionActive] = useState(false)
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null)
@@ -521,12 +528,14 @@ export default function ReportPage() {
         }
         
         // Extract fusion metrics from areaData (if available)
-        let fusionMetricsForEos: { gapsFilled: number, maxGapDays: number, radarContribution: number, continuityScore: number } | undefined
+        let fusionMetricsForEos: { gapsFilled: number, maxGapDays: number, radarContribution: number, continuityScore: number, isBeta?: boolean } | undefined
         if (agroData?.rawAreaData) {
           try {
             const areaDataForFusion = JSON.parse(agroData.rawAreaData)
             if (areaDataForFusion.fusionMetrics) {
               fusionMetricsForEos = areaDataForFusion.fusionMetrics
+              // Se fusão BETA SAR-NDVI foi usada, os dados SAR já estão integrados na série principal
+              setIsSarFusionActive(fusionMetricsForEos?.isBeta === true)
             }
           } catch { /* ignore */ }
         }
@@ -664,58 +673,102 @@ export default function ReportPage() {
 
   useEffect(() => {
     fetchData()
-  }, [fetchData])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fieldId]) // Executar apenas quando fieldId muda
+
+  // Mostrar modal se field.status === 'PROCESSING'
+  useEffect(() => {
+    if (field?.status === 'PROCESSING') {
+      // Campo está processando - mostrar modal
+      if (!showProcessingModal) {
+        setShowProcessingModal(true)
+        setProcessingStartTime(new Date())
+        // Inicializar steps com primeiro running
+        setProcessingSteps(DEFAULT_PROCESSING_STEPS.map((s, idx) => ({
+          ...s,
+          status: idx === 0 ? 'running' as const : 'pending' as const
+        })))
+      }
+      
+      // Polling para atualizar status
+      const pollInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/fields/${fieldId}/status`)
+          if (res.ok) {
+            const statusData = await res.json()
+            if (statusData.status === 'SUCCESS' || statusData.status === 'PARTIAL') {
+              // Completou - buscar dados e fechar modal
+              clearInterval(pollInterval)
+              setProcessingSteps(prev => prev.map(s => ({ ...s, status: 'completed' as const })))
+              setTimeout(() => {
+                setShowProcessingModal(false)
+                fetchData()
+              }, 1500)
+            } else if (statusData.status === 'ERROR') {
+              // Erro - fechar modal
+              clearInterval(pollInterval)
+              setProcessingSteps(prev => prev.map(s => 
+                s.status === 'running' ? { ...s, status: 'error' as const } : s
+              ))
+              setTimeout(() => {
+                setShowProcessingModal(false)
+                fetchData()
+              }, 2000)
+            }
+          }
+        } catch (e) {
+          console.error('Polling error:', e)
+        }
+      }, 5000)
+      
+      // Simular progresso dos steps a cada 15 segundos
+      const stepInterval = setInterval(() => {
+        setProcessingSteps(prev => {
+          const runningIdx = prev.findIndex(s => s.status === 'running')
+          if (runningIdx >= 0 && runningIdx < prev.length - 1) {
+            return prev.map((s, idx) => {
+              if (idx === runningIdx) return { ...s, status: 'completed' as const }
+              if (idx === runningIdx + 1) return { ...s, status: 'running' as const }
+              return s
+            })
+          }
+          return prev
+        })
+      }, 15000)
+      
+      return () => {
+        clearInterval(pollInterval)
+        clearInterval(stepInterval)
+      }
+    } else {
+      // Campo não está processando - esconder modal
+      if (showProcessingModal && field?.status) {
+        setShowProcessingModal(false)
+      }
+    }
+  }, [field?.status, fieldId, showProcessingModal, fetchData])
 
   const handleReprocess = async () => {
     if (!confirm('Reprocessar irá buscar novos dados de satélite e recalcular todas as análises. Continuar?')) return
 
     setIsReprocessing(true)
     
-    // Iniciar processamento (fire and forget - não esperar resposta)
-    // O processamento pode levar até 5 minutos
+    // Atualizar status local para PROCESSING
+    setField((prev: any) => prev ? { ...prev, status: 'PROCESSING' } : prev)
+    
+    // Mostrar modal
+    setShowProcessingModal(true)
+    setProcessingStartTime(new Date())
+    setProcessingSteps(DEFAULT_PROCESSING_STEPS.map((s, idx) => ({
+      ...s,
+      status: idx === 0 ? 'running' as const : 'pending' as const
+    })))
+    
+    // Iniciar processamento (fire and forget)
     fetch(`/api/fields/${fieldId}/process`, { method: 'POST' })
-      .catch(() => { /* Request sent, processing in background */ })
-
-    // Polling para verificar quando terminar
-    const pollInterval = 10000 // 10 segundos
-    const maxPolls = 36 // 6 minutos máximo
-    let polls = 0
-
-    const checkStatus = async (): Promise<void> => {
-      polls++
-      try {
-        const res = await fetch(`/api/fields/${fieldId}`)
-        if (res.ok) {
-          const fieldData = await res.json()
-          
-          if (fieldData.status === 'SUCCESS' || fieldData.status === 'PARTIAL') {
-            // Processamento concluído
-            await fetchData()
-            setIsReprocessing(false)
-            return
-          } else if (fieldData.status === 'ERROR') {
-            // Processamento falhou
-            alert(`Erro no processamento: ${fieldData.errorMessage || 'Erro desconhecido'}`)
-            await fetchData()
-            setIsReprocessing(false)
-            return
-          } else if (fieldData.status === 'PROCESSING' && polls < maxPolls) {
-            // Ainda processando
-            setTimeout(checkStatus, pollInterval)
-            return
-          }
-        }
-      } catch (error) {
-        console.error('Error checking field status:', error)
-      }
-
-      // Timeout - atualizar dados de qualquer forma
-      await fetchData()
-      setIsReprocessing(false)
-    }
-
-    // Iniciar polling após 5 segundos
-    setTimeout(checkStatus, 5000)
+      .catch(() => { /* Request sent */ })
+    
+    setIsReprocessing(false)
   }
 
   const handleSelectTemplate = async (templateId: string) => {
@@ -778,7 +831,8 @@ export default function ReportPage() {
     : prepareChartData(ndviData, historicalNdvi, agroData)
   
   // Enriquecer chartData com dados de radar (se disponíveis e flag habilitada)
-  const chartData = useMemo(() => {
+  // Não usar useMemo aqui para evitar problemas com ordem de hooks
+  const chartData = (() => {
     if (!featureFlags?.showRadarOverlay || !radarData?.rviTimeSeries?.length) {
       return baseChartData
     }
@@ -805,7 +859,7 @@ export default function ReportPage() {
       const radarNdvi = radarMap.get(pt.date)
       return radarNdvi !== undefined ? { ...pt, radarNdvi } : pt
     })
-  }, [baseChartData, radarData, featureFlags?.showRadarOverlay, field?.cropType])
+  })()
   
   // Calcular informações do ciclo para exibição
   const hasHistoricalCycles = (cycleAnalysis?.historicalCycles?.length ?? 0) > 0
@@ -859,7 +913,18 @@ export default function ReportPage() {
   })()
 
   return (
-    <div className="p-8 space-y-8">
+    <>
+      {/* Modal de processamento - aparece quando field.status === 'PROCESSING' */}
+      {showProcessingModal && (
+        <ProcessingModal
+          fieldName={field?.name || 'Talhão'}
+          steps={processingSteps}
+          startTime={processingStartTime}
+          onClose={() => setShowProcessingModal(false)}
+        />
+      )}
+      
+      <div className="p-8 space-y-8">
         {/* Header */}
         <div className="flex items-center justify-between">
           <Link
@@ -874,13 +939,13 @@ export default function ReportPage() {
               variant="outline"
               size="sm"
               onClick={handleReprocess}
-              disabled={isReprocessing}
+              disabled={isReprocessing || field?.status === 'PROCESSING'}
               className="gap-2"
             >
-              {isReprocessing ? (
+              {isReprocessing || field?.status === 'PROCESSING' ? (
                 <>
                   <Loader2 size={14} className="animate-spin" />
-                  Reprocessando...
+                  Processando...
                 </>
               ) : (
                 <>
@@ -1125,8 +1190,8 @@ export default function ReportPage() {
                     connectNulls
                   />
                   
-                  {/* Radar NDVI overlay - when enabled and data available */}
-                  {featureFlags?.showRadarOverlay && radarData?.rviTimeSeries?.length > 0 && (
+                  {/* Radar NDVI overlay - only show when NOT using BETA SAR fusion (since SAR is already integrated) */}
+                  {featureFlags?.showRadarOverlay && radarData?.rviTimeSeries?.length > 0 && !isSarFusionActive && (
                     <Line 
                       type="monotone" 
                       dataKey="radarNdvi" 
@@ -1159,8 +1224,8 @@ export default function ReportPage() {
                   </div>
                 )}
                 
-                {/* Radar Sentinel-1 */}
-                {featureFlags?.showRadarOverlay && chartData.some((d: any) => d.radarNdvi !== undefined) && (
+                {/* Radar Sentinel-1 - only show when NOT using BETA SAR fusion */}
+                {featureFlags?.showRadarOverlay && chartData.some((d: any) => d.radarNdvi !== undefined) && !isSarFusionActive && (
                   <div className="flex items-center gap-2">
                     <div className="w-8 border-t-2 border-dashed border-violet-500"></div>
                     <span className="text-violet-600 font-medium">Radar (Sentinel-1)</span>
@@ -1245,7 +1310,8 @@ export default function ReportPage() {
             onReprocessed={fetchData}
           />
         )}
-    </div>
+      </div>
+    </>
   )
 }
 

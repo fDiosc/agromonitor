@@ -50,6 +50,8 @@ interface FeatureFlags {
 
   // Cálculos avançados
   useRadarForGaps: boolean
+  useLocalCalibration: boolean
+  enableSarNdviFusion: boolean  // [BETA] Fusão adaptativa SAR-NDVI
   useGddForEos: boolean
   useWaterBalanceAdjust: boolean
   usePrecipitationAdjust: boolean
@@ -84,6 +86,8 @@ const DEFAULT_FLAGS: FeatureFlags = {
   showClimateEnvelope: false,
   showSatelliteSchedule: true,
   useRadarForGaps: false,
+  useLocalCalibration: false,
+  enableSarNdviFusion: false,
   useGddForEos: false,
   useWaterBalanceAdjust: false,
   usePrecipitationAdjust: true,
@@ -415,7 +419,7 @@ export default function SettingsPage() {
                         <li>Acesse <a href="https://dataspace.copernicus.eu" target="_blank" rel="noopener" className="underline">dataspace.copernicus.eu</a></li>
                         <li>Crie uma conta gratuita</li>
                         <li>Vá em User Settings → OAuth clients</li>
-                        <li>Clique em "Create" e copie o Client ID e Secret</li>
+                        <li>Clique em &quot;Create&quot; e copie o Client ID e Secret</li>
                       </ol>
                     </div>
                   </div>
@@ -455,7 +459,7 @@ export default function SettingsPage() {
                 {copernicusClientId && copernicusClientSecret && (
                   <div className="flex items-center gap-2 text-emerald-600 text-sm">
                     <Check className="w-4 h-4" />
-                    <span>Credenciais configuradas. Habilite "Sentinel-1 Radar" nos módulos para usar.</span>
+                    <span>Credenciais configuradas. Habilite &quot;Sentinel-1 Radar&quot; nos módulos para usar.</span>
                   </div>
                 )}
               </div>
@@ -647,6 +651,41 @@ export default function SettingsPage() {
               onChange={(v) => updateFlag('useRadarForGaps', v)}
               icon={Radar}
             />
+            
+            {flags.useRadarForGaps && (
+              <div className="ml-7 space-y-2">
+                <FeatureToggle
+                  label="Fusão Adaptativa SAR-NDVI"
+                  description="Usa modelos GPR/KNN para predizer NDVI a partir de Sentinel-1 (VV/VH). Seleciona automaticamente as melhores features e treina modelo específico por talhão."
+                  checked={flags.enableSarNdviFusion}
+                  onChange={(v) => {
+                    updateFlag('enableSarNdviFusion', v)
+                    // Se ativar fusão adaptativa, ativar calibração local automaticamente
+                    if (v) updateFlag('useLocalCalibration', true)
+                  }}
+                  icon={Sparkles}
+                  badge="BETA"
+                />
+                
+                {flags.enableSarNdviFusion ? (
+                  <div className="ml-7 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      <strong>Funcionalidade BETA:</strong> Usa técnicas avançadas de Machine Learning 
+                      (GPR, KNN) para estimar NDVI a partir de dados SAR. Inclui calibração local por talhão 
+                      de forma automática. Melhora precisão em períodos nublados.
+                    </p>
+                  </div>
+                ) : (
+                  <FeatureToggle
+                    label="Calibração Local (Regressão Linear)"
+                    description="Treina modelo RVI→NDVI por talhão. Alternativa mais simples à fusão adaptativa."
+                    checked={flags.useLocalCalibration}
+                    onChange={(v) => updateFlag('useLocalCalibration', v)}
+                    icon={Sparkles}
+                  />
+                )}
+              </div>
+            )}
             
             <FeatureToggle
               label="Usar GDD para Projeção de EOS"
