@@ -202,6 +202,7 @@ app/api/
 │   ├── route.ts                    # GET (list), POST (create)
 │   └── [id]/
 │       ├── route.ts                # GET, DELETE
+│       ├── status/route.ts         # GET (lightweight status check)
 │       ├── process/route.ts        # POST (process)
 │       └── analyze/[templateId]/route.ts
 ├── logistics/

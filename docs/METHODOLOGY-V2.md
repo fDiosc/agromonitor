@@ -78,8 +78,9 @@ lib/services/
 ├── thermal.service.ts          # Soma térmica (GDD)
 ├── climate-envelope.service.ts # Bandas históricas (Bollinger-like)
 ├── sentinel1.service.ts        # Integração radar Copernicus
+├── rvi-calibration.service.ts  # Calibração local RVI→NDVI (ML)
 ├── ndvi-fusion.service.ts      # Fusão óptico + radar
-├── eos-fusion.service.ts       # Fusão EOS (NDVI + GDD + Hídrico) ← NOVO
+├── eos-fusion.service.ts       # Fusão EOS (NDVI + GDD + Hídrico)
 ├── satellite-schedule.service.ts # Previsão de passagens
 └── phenology.service.ts        # Cálculos fenológicos (existente)
 ```
@@ -155,14 +156,36 @@ Referência: Kim & van Zyl (2009)
 
 ```
 NDVI_estimado = a × RVI + b
-
-Onde (por cultura):
-- SOJA:    a=1.15, b=-0.15, R²=0.78
-- MILHO:   a=1.10, b=-0.12, R²=0.75
-- ALGODÃO: a=1.20, b=-0.18, R²=0.72
 ```
 
-Referências: Filgueiras et al. (2019), Veloso et al. (2017)
+#### Coeficientes Fixos (Literatura)
+
+| Cultura  | a     | b      | R²   | Fonte                    |
+|----------|-------|--------|------|--------------------------|
+| SOJA     | 1.15  | -0.15  | 0.78 | Filgueiras et al. (2019) |
+| MILHO    | 1.10  | -0.12  | 0.75 | Filgueiras et al. (2019) |
+| ALGODÃO  | 1.20  | -0.18  | 0.72 | Veloso et al. (2017)     |
+
+#### Calibração Local (Machine Learning Hyperlocal) - NOVO
+
+Baseado em: **Pelta et al. (2022)** "SNAF: Sentinel-1 to NDVI for Agricultural Fields Using Hyperlocal Dynamic Machine Learning Approach" - Remote Sensing, 14(11), 2600
+
+**Conceito**: A relação RVI-NDVI varia por talhão, cultura, solo e condições locais. O SNAF demonstrou que modelos específicos por campo alcançam RMSE de 0.06 e R² de 0.92.
+
+**Implementação**:
+- **Coleta de Pares**: Durante processamento, identifica datas coincidentes (±1 dia) entre NDVI óptico e RVI radar
+- **Treinamento**: Quando existem ≥15 pares, treina regressão linear OLS para o talhão
+- **Validação**: Modelo local só é usado se R² ≥ 0.5
+- **Fallback**: Se modelo local não disponível, usa coeficientes fixos da literatura
+
+**Feature Flag**: `useLocalCalibration` (sub-opção de `useRadarForGaps`)
+
+**Benefícios**:
+- Maior precisão na conversão RVI→NDVI por adaptar-se às condições locais
+- Melhora progressiva com mais dados históricos
+- Qualidade dos pontos radar elevada de 0.7 para 0.85 × R²
+
+Referências: Pelta et al. (2022), Filgueiras et al. (2019), Veloso et al. (2017)
 
 ### 3.3 Precipitação
 
@@ -457,6 +480,7 @@ Exemplo 2 (Nova Bandeirantes, MT):
 | Flag                   | Default | Descrição                              |
 |------------------------|---------|----------------------------------------|
 | useRadarForGaps        | false   | Usar radar para preencher gaps NDVI    |
+| useLocalCalibration    | false   | Treinar modelo local RVI→NDVI por talhão (sub-opção de useRadarForGaps) |
 | useGddForEos           | false   | Usar GDD na projeção de EOS            |
 | useWaterBalanceAdjust  | false   | Ajustar EOS por estresse hídrico       |
 | usePrecipitationAdjust | true    | Ajustar colheita por precipitação      |

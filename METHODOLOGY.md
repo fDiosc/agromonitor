@@ -6,6 +6,7 @@
 2. [Fonte de Dados](#2-fonte-de-dados)
 3. [Detecção Fenológica](#3-detecção-fenológica)
 4. [Interpolação e Suavização](#4-interpolação-e-suavização)
+   - [Fusão Adaptativa SAR-NDVI [BETA]](#44-fusão-adaptativa-sar-ndvi-beta)
 5. [Correlação Histórica](#5-correlação-histórica)
 6. [Projeção Adaptativa](#6-projeção-adaptativa-por-fase-fenológica)
 7. [Níveis de Confiança](#7-níveis-de-confiança)
@@ -184,6 +185,165 @@ if (idx - lastIdx > 1 && idx - lastIdx < 10) {
   }
 }
 ```
+
+### 4.4 Fusão Adaptativa SAR-NDVI [BETA]
+
+O sistema implementa uma técnica avançada de fusão de dados que combina NDVI óptico (Sentinel-2) com dados de radar SAR (Sentinel-1) para preencher lacunas causadas por cobertura de nuvens.
+
+#### Arquitetura do Módulo
+
+```
+┌─────────────────┐    ┌─────────────────┐
+│   NDVI Óptico   │    │   SAR Sentinel-1│
+│   (Sentinel-2)  │    │   (VV / VH)     │
+└────────┬────────┘    └────────┬────────┘
+         │                      │
+         ▼                      ▼
+┌─────────────────────────────────────────┐
+│      SELEÇÃO ADAPTATIVA DE FEATURES     │
+│  - Correlação VH vs NDVI               │
+│  - Correlação VV vs NDVI               │
+│  - Correlação VV+VH vs NDVI            │
+│  → Escolhe melhor feature por talhão    │
+└────────────────────┬────────────────────┘
+                     ▼
+┌─────────────────────────────────────────┐
+│      CALIBRAÇÃO LOCAL POR TALHÃO        │
+│  - Gaussian Process Regression (GPR)    │
+│  - K-Nearest Neighbors (KNN)            │
+│  - Linear Regression (fallback)         │
+│  → Treina modelo específico por talhão  │
+└────────────────────┬────────────────────┘
+                     ▼
+┌─────────────────────────────────────────┐
+│         PREDIÇÃO EM GAPS                │
+│  - Identifica gaps no NDVI óptico       │
+│  - Aplica modelo para estimar NDVI      │
+│  - Calcula incerteza da predição        │
+└────────────────────┬────────────────────┘
+                     ▼
+┌─────────────────────────────────────────┐
+│       SÉRIE NDVI FUSIONADA              │
+│  → Dados ópticos + SAR-estimados        │
+│  → Melhora detecção de EOS              │
+│  → Ajusta score de confiança            │
+└─────────────────────────────────────────┘
+```
+
+#### Seleção Adaptativa de Features
+
+O sistema seleciona automaticamente a melhor combinação de polarizações SAR por talhão:
+
+| Regra | Feature Selecionada | Critério |
+|-------|---------------------|----------|
+| 1 | VH | `corr(VH, NDVI) > 0.70` |
+| 2 | VV | `corr(VV, NDVI) > corr(VH, NDVI) + 0.15` |
+| 3 | VV+VH | Nenhuma acima atendida → combina ambas |
+
+**Justificativa Científica:**
+- **VH**: Mais sensível à estrutura da vegetação (biomassa)
+- **VV**: Mais sensível à umidade do solo e superfície
+- **VV+VH**: Combinação robusta quando correlações individuais são baixas
+
+#### Modelos de Machine Learning
+
+O sistema seleciona o melhor modelo via Leave-One-Out Cross-Validation:
+
+| Modelo | Descrição | Vantagem |
+|--------|-----------|----------|
+| **GPR** | Gaussian Process Regression | Fornece incerteza das predições |
+| **KNN** | K-Nearest Neighbors (k=3) | Robusto a outliers |
+| **Linear** | Regressão Linear (fallback) | Simples, sempre disponível |
+
+**Critérios de seleção:**
+```javascript
+// Escolhe modelo com menor RMSE no LOOCV
+const bestModel = ['GPR', 'KNN', 'LINEAR']
+  .map(m => ({ model: m, rmse: loocvRmse(m) }))
+  .sort((a, b) => a.rmse - b.rmse)[0]
+```
+
+#### Ajuste de Confiança
+
+A presença de dados SAR-fusionados afeta o score de confiança da detecção de colheita:
+
+| Proporção SAR | Ajuste de Confiança | Fonte Indicada |
+|---------------|---------------------|----------------|
+| ≤ 30% | +0% a -5% | OPTICAL |
+| 30-60% | -5% a -15% | MIXED |
+| > 60% | -15% a -25% | SAR_HEAVY |
+
+**Fórmula:**
+```javascript
+function calculateHarvestConfidence(baseConfidence, fusionR2, sarRatio) {
+  // sarRatio: proporção de pontos SAR-fusionados (0-1)
+  // fusionR2: R² do modelo de calibração (0-1)
+  
+  let adjustment = 1.0
+  if (sarRatio > 0.6) {
+    adjustment = 0.75 + 0.15 * fusionR2  // -10% a -25%
+  } else if (sarRatio > 0.3) {
+    adjustment = 0.85 + 0.10 * fusionR2  // -5% a -15%
+  } else {
+    adjustment = 0.95 + 0.05 * fusionR2  // 0% a -5%
+  }
+  
+  return baseConfidence * adjustment
+}
+```
+
+#### Fallback Gracioso
+
+O sistema garante funcionamento mesmo quando a fusão falha:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    ESTRATÉGIA DE FALLBACK                   │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. Se enableSarNdviFusion = false                          │
+│     → Usa fusão RVI clássica (se useRadarForGaps = true)    │
+│     → Ou usa apenas NDVI óptico                             │
+│                                                             │
+│  2. Se fusão adaptativa falha (erro/exceção)                │
+│     → Log do erro                                           │
+│     → Fallback para fusão RVI clássica                      │
+│     → Se RVI falha → usa NDVI óptico                        │
+│                                                             │
+│  3. Se dados SAR insuficientes (< 5 pontos coincidentes)    │
+│     → Marca calibration.valid = false                       │
+│     → Usa NDVI óptico apenas                                │
+│                                                             │
+│  4. Se modelo tem R² < 0.3                                  │
+│     → Marca como calibração de baixa qualidade              │
+│     → Predições SAR recebem alta incerteza                  │
+│     → Peso reduzido no score de confiança                   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Integração com Detecção de Colheita
+
+Os dados SAR-fusionados alimentam diretamente o algoritmo de detecção fenológica:
+
+1. **Entrada**: Série NDVI fusionada (óptico + SAR-estimado)
+2. **Processamento**: Algoritmo de detecção de EOS inalterado
+3. **Saída**: Data de colheita com `confidenceNote` indicando fonte de dados
+
+**Exemplo de nota de confiança:**
+- "Dados 100% ópticos" → `confidenceScore` sem ajuste
+- "Fusão SAR moderada (45% SAR, R²=82%)" → Ajuste de -8%
+- "Fusão SAR pesada (72% SAR, R²=68%)" → Ajuste de -18%
+
+#### Habilitação (Feature Flag)
+
+| Flag | Localização | Descrição |
+|------|-------------|-----------|
+| `enableSarNdviFusion` | WorkspaceSettings | Habilita fusão adaptativa [BETA] |
+| `useRadarForGaps` | WorkspaceSettings | Habilita fusão RVI clássica |
+| `useLocalCalibration` | WorkspaceSettings | Treina modelo local por talhão |
+
+> **Importante**: `enableSarNdviFusion` está em fase BETA. A funcionalidade opera de forma transparente - se desabilitada ou em caso de falha, o sistema reverte automaticamente para o comportamento anterior.
 
 ---
 
@@ -820,6 +980,8 @@ Todas as análises geradas por modelos de linguagem (LLM) exibem:
 | 1.6.0 | 2026-01 | Transparência de IA: badges e tooltips explicativos |
 | 2.0.0 | 2026-01 | **Arquitetura Híbrida**: Métricas algorítmicas + análise qualitativa por IA |
 | 2.1.0 | 2026-01 | Gemini 3 Flash Preview, correção timezone, polling automático |
+| 2.2.0 | 2026-02 | **[BETA] Fusão Adaptativa SAR-NDVI**: GPR/KNN para estimar NDVI de Sentinel-1, seleção adaptativa de features (VH/VV/VV+VH), calibração local por talhão, ajuste de confiança baseado em fonte de dados, fallback gracioso |
+| 2.3.0 | 2026-02 | **UX de Processamento**: Modal contextual na página do talhão, endpoint leve `/api/fields/[id]/status` para polling eficiente, correção de loops de re-renderização |
 
 ---
 

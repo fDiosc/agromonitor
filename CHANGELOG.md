@@ -22,6 +22,143 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.26] - 2026-02-04
+
+### UX de Processamento e Performance
+
+Reestruturação completa da experiência de processamento de talhões com foco em não bloquear a navegação do usuário.
+
+**Modal de Processamento Contextual**:
+- Modal com overlay aparece APENAS dentro da página do talhão (`/reports/[id]`)
+- Dashboard mostra status "Processando" com spinner no card do talhão
+- Usuário pode fechar o modal e sair da página - processamento continua em background
+- Se voltar ao talhão em processamento, modal reaparece
+
+**Bloqueio Inteligente**:
+- Botão "Ver" no dashboard fica desabilitado durante processamento
+- Impede acesso a relatório antes dos dados estarem prontos
+- Botão de reprocessar fica desabilitado enquanto processando
+
+**Endpoint de Status Leve**:
+- Novo `GET /api/fields/[id]/status` retorna apenas: id, status, errorMessage, updatedAt
+- Usado no polling durante processamento
+- Evita recálculo de análises a cada verificação de status
+- Reduz carga de CPU e tempo de resposta
+
+**Correção de Loops de Re-renderização**:
+- Fixed `useEffect` dependencies que causavam múltiplas chamadas
+- Polling só é acionado quando necessário
+- Cleanup adequado de intervals ao desmontar componentes
+
+**Técnico**:
+- Removido overlay global do `ProcessingProvider`
+- `ProcessingModal` exportado como componente para uso local
+- Dashboard não depende mais do `useProcessing` context
+- Polling usa endpoint leve em vez de buscar dados completos
+
+---
+
+## [0.0.25] - 2026-02-04
+
+### [BETA] Fusão Adaptativa SAR-NDVI (Machine Learning Avançado)
+
+Implementação de técnica avançada de fusão de dados que combina NDVI óptico (Sentinel-2) com radar SAR (Sentinel-1) usando modelos de Machine Learning adaptativos.
+
+**Arquitetura Adaptativa**:
+- Seleção automática de features SAR por talhão (VH, VV, ou VV+VH)
+- Escolha de melhor modelo via Leave-One-Out Cross-Validation
+- Três modelos disponíveis: GPR, KNN, Regressão Linear (fallback)
+
+**Seleção de Features**:
+- VH priorizado se correlação com NDVI > 70%
+- VV usado se correlação supera VH em 15%+
+- VV+VH combinado como fallback robusto
+
+**Modelos de ML**:
+- **Gaussian Process Regression (GPR)**: Predições com estimativa de incerteza
+- **K-Nearest Neighbors (KNN)**: Robusto a outliers (k=3)
+- **Linear Regression**: Fallback simples, sempre disponível
+
+**Ajuste de Confiança**:
+- Score de confiança de colheita ajustado baseado em fonte de dados
+- ≤30% SAR: ajuste mínimo (0% a -5%)
+- 30-60% SAR: ajuste moderado (-5% a -15%)
+- >60% SAR: ajuste significativo (-15% a -25%)
+- `confidenceNote` adicionada aos dados indicando fonte
+
+**Fallback Gracioso**:
+- Sistema funciona normalmente se feature desabilitada
+- Em caso de erro, reverte para fusão RVI clássica
+- Em caso de dados insuficientes, usa NDVI óptico puro
+
+**Nova Feature Flag**:
+- `enableSarNdviFusion`: Toggle BETA em WorkspaceSettings
+- Sub-opção de `useRadarForGaps`
+- Badge BETA com explicação detalhada na UI
+
+**UI de Settings**:
+- Novo toggle "Fusão Adaptativa SAR-NDVI" com badge BETA
+- Caixa informativa amarela explicando funcionalidade BETA
+- Descrição técnica do funcionamento
+
+**Técnico**:
+- Novo serviço `lib/services/sar-ndvi-adaptive.service.ts`
+- Funções: `fuseSarNdvi`, `isSarFusionEnabled`, `calculateHarvestConfidence`
+- Calibração persistida em `agroData.rawAreaData.sarCalibration`
+- Integração no `process/route.ts` com try-catch para fallback
+
+**Documentação**:
+- Nova seção 4.4 no METHODOLOGY.md
+- Diagramas de arquitetura e fluxo
+- Tabelas de ajuste de confiança
+- Estratégia de fallback documentada
+
+---
+
+## [0.0.24] - 2026-01-29
+
+### Calibração Local RVI-NDVI (Machine Learning Hyperlocal)
+
+Implementação de calibração local para conversão RVI→NDVI baseada em metodologia científica SNAF.
+
+**Base Científica**:
+- Pelta et al. (2022) "SNAF: Sentinel-1 to NDVI for Agricultural Fields Using Hyperlocal Dynamic Machine Learning Approach" - Remote Sensing, 14(11), 2600
+- Metodologia alcança RMSE 0.06 e R² 0.92 com modelos específicos por talhão
+
+**Coleta Automática de Pares NDVI-RVI**:
+- Durante processamento, identifica datas coincidentes (±1 dia) entre NDVI óptico e RVI radar
+- Salva pares na nova tabela `RviNdviPair` para treinamento futuro
+- Filtra por qualidade (cloudCover < 50%, NDVI > 0, RVI > 0)
+
+**Treinamento de Modelo Local**:
+- Quando ≥15 pares disponíveis, treina regressão linear OLS por talhão
+- Calcula coeficientes a, b, R² e RMSE
+- Modelo só é usado se R² ≥ 0.5 (validação de qualidade)
+- Salva calibração na nova tabela `RviNdviCalibration`
+
+**Cascade de 3 Níveis (Fallback)**:
+1. Calibração Local (se `useLocalCalibration=true` e modelo existe com R²≥0.5)
+2. Coeficientes Fixos da Literatura (Filgueiras et al., Veloso et al.)
+3. NDVI Óptico puro (se radar desabilitado ou indisponível)
+
+**Nova Feature Flag**:
+- `useLocalCalibration`: Toggle para habilitar/desabilitar treinamento local
+- Sub-opção de `useRadarForGaps` (só aparece quando radar habilitado)
+- Permite controle de processamento (desabilitar reduz carga computacional)
+
+**UI de Settings**:
+- Novo toggle "Calibração Local (Machine Learning)" na aba Cálculos
+- Badge "Novo" indicando feature recente
+- Descrição explicando funcionamento e requisitos
+
+**Técnico**:
+- Novo serviço `lib/services/rvi-calibration.service.ts`
+- Novos modelos Prisma: `RviNdviCalibration`, `RviNdviPair`
+- Integração no `process/route.ts` para coleta e treinamento automático
+- `FusionResult` agora inclui `calibrationR2` quando modelo local é usado
+
+---
+
 ## [0.0.23] - 2026-02-04
 
 ### Integração Completa Sentinel-1 (Radar)
