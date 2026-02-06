@@ -228,7 +228,7 @@ export async function DELETE(
 
 /**
  * PATCH /api/fields/[id]
- * Atualiza campos específicos de um talhão (ex: caixa logística)
+ * Atualiza campos específicos de um talhão (nome, produtor, caixa logística)
  */
 export async function PATCH(
   request: NextRequest,
@@ -249,7 +249,7 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { logisticsUnitId } = body
+    const { logisticsUnitId, name, producerId } = body
 
     // Verificar se o talhão existe e pertence ao workspace
     const existingField = await prisma.field.findFirst({
@@ -266,8 +266,33 @@ export async function PATCH(
       )
     }
 
+    // Validar nome se fornecido
+    if (name !== undefined && (!name || name.trim() === '')) {
+      return NextResponse.json(
+        { error: 'Nome não pode ser vazio' },
+        { status: 400 }
+      )
+    }
+
+    // Validar produtor se fornecido (pode ser null para desvincular)
+    if (producerId !== undefined && producerId !== null) {
+      const producer = await prisma.producer.findFirst({
+        where: {
+          id: producerId,
+          workspaceId: session.workspaceId
+        }
+      })
+
+      if (!producer) {
+        return NextResponse.json(
+          { error: 'Produtor não encontrado' },
+          { status: 400 }
+        )
+      }
+    }
+
     // Se logisticsUnitId foi fornecido, validar que pertence ao workspace
-    if (logisticsUnitId) {
+    if (logisticsUnitId !== undefined && logisticsUnitId !== null) {
       const unit = await prisma.logisticsUnit.findFirst({
         where: {
           id: logisticsUnitId,
@@ -288,12 +313,17 @@ export async function PATCH(
     const updatedField = await prisma.field.update({
       where: { id: params.id },
       data: {
+        ...(name !== undefined && { name: name.trim() }),
+        ...(producerId !== undefined && { producerId: producerId || null }),
         ...(logisticsUnitId !== undefined && { 
           logisticsUnitId: logisticsUnitId || null 
         })
       },
       include: {
         logisticsUnit: {
+          select: { id: true, name: true }
+        },
+        producer: {
           select: { id: true, name: true }
         }
       }

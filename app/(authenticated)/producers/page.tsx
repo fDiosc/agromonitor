@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { EditFieldModal } from '@/components/modals/EditFieldModal'
 import Link from 'next/link'
 import {
   Users,
@@ -36,6 +37,8 @@ interface Field {
   state: string | null
   areaHa: number | null
   status: string
+  producer?: { id: string; name: string } | null
+  logisticsUnit?: { id: string; name: string } | null
   agroData?: {
     volumeEstimatedKg: number | null
     eosDate: string | null
@@ -82,6 +85,10 @@ export default function ProducersPage() {
   const [expandedProducerId, setExpandedProducerId] = useState<string | null>(null)
   const [producerFields, setProducerFields] = useState<Field[]>([])
   const [loadingFields, setLoadingFields] = useState(false)
+
+  // Edit Field Modal state
+  const [showEditFieldModal, setShowEditFieldModal] = useState(false)
+  const [editingField, setEditingField] = useState<Field | null>(null)
 
   const fetchProducers = async () => {
     try {
@@ -136,6 +143,19 @@ export default function ProducersPage() {
       setExpandedProducerId(producerId)
       fetchProducerFields(producerId)
     }
+  }
+
+  const openEditFieldModal = (field: Field) => {
+    setEditingField(field)
+    setShowEditFieldModal(true)
+  }
+
+  const handleEditFieldSuccess = () => {
+    // Recarregar talhões do produtor expandido e lista de produtores
+    if (expandedProducerId) {
+      fetchProducerFields(expandedProducerId)
+    }
+    fetchProducers()
   }
 
   const openCreateModal = () => {
@@ -400,16 +420,31 @@ export default function ProducersPage() {
                                      field.status === 'ERROR' ? 'Erro' : 'Pend.'}
                                   </Badge>
                                 </div>
-                                <Link href={`/reports/${field.id}`}>
+                                <div className="flex items-center gap-1">
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    disabled={field.status !== 'SUCCESS'}
-                                    className="text-slate-400 hover:text-emerald-600"
+                                    onClick={() => openEditFieldModal({
+                                      ...field,
+                                      producer: { id: producer.id, name: producer.name }
+                                    })}
+                                    className="text-slate-400 hover:text-blue-600"
+                                    title="Editar talhão"
                                   >
-                                    <Eye size={16} />
+                                    <Pencil size={16} />
                                   </Button>
-                                </Link>
+                                  <Link href={`/reports/${field.id}`}>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      disabled={field.status !== 'SUCCESS'}
+                                      className="text-slate-400 hover:text-emerald-600"
+                                      title="Ver relatório"
+                                    >
+                                      <Eye size={16} />
+                                    </Button>
+                                  </Link>
+                                </div>
                               </div>
                             </div>
                           ))}
@@ -535,6 +570,24 @@ export default function ProducersPage() {
           </div>
         </div>
       )}
+
+      {/* Edit Field Modal */}
+      <EditFieldModal
+        isOpen={showEditFieldModal}
+        onClose={() => {
+          setShowEditFieldModal(false)
+          setEditingField(null)
+        }}
+        onSuccess={handleEditFieldSuccess}
+        field={editingField ? {
+          id: editingField.id,
+          name: editingField.name,
+          producerId: editingField.producer?.id || null,
+          logisticsUnitId: editingField.logisticsUnit?.id || null
+        } : null}
+        producers={producers.map(p => ({ id: p.id, name: p.name }))}
+        logisticsUnits={logisticsUnits}
+      />
     </div>
   )
 }

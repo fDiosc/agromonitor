@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { EditFieldModal } from '@/components/modals/EditFieldModal'
 import { 
   Loader2, 
   AlertOctagon, 
@@ -12,10 +13,16 @@ import {
   ChevronDown,
   RefreshCw,
   AlertTriangle,
-  CheckCircle
+  CheckCircle,
+  Pencil
 } from 'lucide-react'
 
 interface LogisticsUnit {
+  id: string
+  name: string
+}
+
+interface Producer {
   id: string
   name: string
 }
@@ -26,6 +33,7 @@ interface FieldWithIntersection {
   city: string | null
   state: string | null
   areaHa: number | null
+  producerId: string | null
   producerName: string | null
   logisticsUnit: LogisticsUnit | null
   producerLogisticsUnit: LogisticsUnit | null
@@ -42,16 +50,22 @@ export default function ManageFieldsPage() {
   const [loading, setLoading] = useState(true)
   const [fields, setFields] = useState<FieldWithIntersection[]>([])
   const [logisticsUnits, setLogisticsUnits] = useState<LogisticsUnit[]>([])
+  const [producers, setProducers] = useState<Producer[]>([])
   const [saving, setSaving] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState<'all' | 'intersection' | 'noAssignment' | 'direct'>('intersection')
   const [expandedFieldId, setExpandedFieldId] = useState<string | null>(null)
 
+  // Edit Field Modal state
+  const [showEditFieldModal, setShowEditFieldModal] = useState(false)
+  const [editingField, setEditingField] = useState<FieldWithIntersection | null>(null)
+
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [coverageRes, unitsRes] = await Promise.all([
+      const [coverageRes, unitsRes, producersRes] = await Promise.all([
         fetch('/api/logistics-units/coverage'),
-        fetch('/api/logistics-units')
+        fetch('/api/logistics-units'),
+        fetch('/api/producers')
       ])
 
       if (coverageRes.ok && unitsRes.ok) {
@@ -65,6 +79,7 @@ export default function ManageFieldsPage() {
           city: string | null
           state: string | null
           areaHa: number | null
+          producerId: string | null
           producerName: string | null
           assignedUnitId: string | null
           assignedUnitName: string | null
@@ -77,6 +92,7 @@ export default function ManageFieldsPage() {
           city: f.city,
           state: f.state,
           areaHa: f.areaHa,
+          producerId: f.producerId || null,
           producerName: f.producerName,
           logisticsUnit: f.assignmentType === 'direct' && f.assignedUnitId 
             ? { id: f.assignedUnitId, name: f.assignedUnitName || '' }
@@ -96,6 +112,11 @@ export default function ManageFieldsPage() {
         setFields(mappedFields)
         setLogisticsUnits(unitsData.logisticsUnits || [])
       }
+
+      if (producersRes.ok) {
+        const producersData = await producersRes.json()
+        setProducers(producersData.producers?.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name })) || [])
+      }
     } catch (error) {
       console.error('Erro ao carregar dados:', error)
     } finally {
@@ -106,6 +127,16 @@ export default function ManageFieldsPage() {
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  const openEditFieldModal = (field: FieldWithIntersection) => {
+    setEditingField(field)
+    setShowEditFieldModal(true)
+  }
+
+  const handleEditFieldSuccess = () => {
+    // Recarregar dados
+    fetchData()
+  }
 
   const handleAssignUnit = async (fieldId: string, unitId: string) => {
     setSaving(fieldId)
@@ -358,7 +389,16 @@ export default function ManageFieldsPage() {
                         )}
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <div className="relative">
+                        <div className="relative flex items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEditFieldModal(field)}
+                            className="text-slate-400 hover:text-blue-600"
+                            title="Editar talhão"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
                           <Button
                             variant="outline"
                             size="sm"
@@ -418,6 +458,24 @@ export default function ManageFieldsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Edit Field Modal */}
+      <EditFieldModal
+        isOpen={showEditFieldModal}
+        onClose={() => {
+          setShowEditFieldModal(false)
+          setEditingField(null)
+        }}
+        onSuccess={handleEditFieldSuccess}
+        field={editingField ? {
+          id: editingField.id,
+          name: editingField.name,
+          producerId: editingField.producerId,
+          logisticsUnitId: editingField.logisticsUnit?.id || null
+        } : null}
+        producers={producers}
+        logisticsUnits={logisticsUnits}
+      />
     </div>
   )
 }
