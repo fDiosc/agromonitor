@@ -162,20 +162,38 @@ function getBbox(geometry: any): [number, number, number, number] | null {
 }
 
 /**
- * Calcula RVI (Radar Vegetation Index) a partir de VH e VV
- * RVI = 4 * VH / (VV + VH)
- * Referência: Kim & van Zyl (2009)
+ * Calcula DpRVI (Dual-pol Radar Vegetation Index) a partir de VH e VV
+ * 
+ * Fórmula correta para Sentinel-1 (RVI4S1):
+ *   q = VH_lin / VV_lin (ratio)
+ *   DpRVI = q(q+3) / (q+1)²
+ * 
+ * Esta fórmula naturalmente varia de 0 a 1:
+ *   - q → 0 (solo exposto): DpRVI → 0
+ *   - q → 1 (vegetação densa): DpRVI → 1
+ * 
+ * Referência: Mandal et al. (2020), Bhogapurapu et al. (2022)
+ * Script oficial: https://custom-scripts.sentinel-hub.com/sentinel-1/radar_vegetation_index/
  */
 function calculateRVI(vhDb: number, vvDb: number): number {
-  // Converter de dB para linear
+  // Converter de dB para linear (potência)
   const vhLin = Math.pow(10, vhDb / 10)
   const vvLin = Math.pow(10, vvDb / 10)
   
-  // RVI = 4 * VH / (VV + VH)
-  // Normalizado para 0-1 (similar a NDVI)
-  const rvi = (4 * vhLin) / (vvLin + vhLin)
+  // Evitar divisão por zero
+  if (vvLin < 1e-10) return 1
   
-  // Clamp para 0-1
+  // Ratio q = VH/VV (em linear)
+  const q = vhLin / vvLin
+  
+  // DpRVI = q(q+3) / (q+1)²
+  // Equivalente a: 1 - m*beta onde m = (1-q)/(1+q) e beta = 1/(1+q)
+  const numerator = q * (q + 3)
+  const denominator = (q + 1) * (q + 1)
+  
+  const rvi = numerator / denominator
+  
+  // Teoricamente já está em 0-1, mas clamp por segurança
   return Math.max(0, Math.min(1, rvi))
 }
 
@@ -267,18 +285,20 @@ async function fetchS1Statistics(
     return []
   }
   
-  // Evalscript para extrair VV e VH em dB
+  // Evalscript para extrair VV e VH em LINEAR_POWER
+  // IMPORTANTE: dataMask é obrigatório para a Statistical API
   const evalscript = `
 //VERSION=3
 function setup() {
   return {
     input: [{
-      bands: ["VV", "VH"],
+      bands: ["VV", "VH", "dataMask"],
       units: "LINEAR_POWER"
     }],
     output: [
       { id: "vv_linear", bands: 1, sampleType: "FLOAT32" },
-      { id: "vh_linear", bands: 1, sampleType: "FLOAT32" }
+      { id: "vh_linear", bands: 1, sampleType: "FLOAT32" },
+      { id: "dataMask", bands: 1, sampleType: "UINT8" }
     ]
   }
 }
@@ -286,7 +306,8 @@ function setup() {
 function evaluatePixel(sample) {
   return {
     vv_linear: [sample.VV],
-    vh_linear: [sample.VH]
+    vh_linear: [sample.VH],
+    dataMask: [sample.dataMask]
   }
 }
 `
@@ -329,8 +350,10 @@ function evaluatePixel(sample) {
             of: 'P1D'
           },
           evalscript,
-          resx: 10,
-          resy: 10
+          // Usar width/height em vez de resx/resy para evitar erro de resolução
+          // 100x100 pixels = ~300m resolução para talhão típico de 30ha
+          width: 100,
+          height: 100
         },
         calculations: {
           default: {}

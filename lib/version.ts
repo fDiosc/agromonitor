@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.0.18'
+export const APP_VERSION = '0.0.20'
 
 // Fases do produto
 export const VERSION_PHASES = {
@@ -25,6 +25,33 @@ export const CHANGELOG: ChangelogEntry[] = [
   // ==================== ALPHA (0.0.x) ====================
   // Changelog consolidado - apenas features finais implementadas
   
+  {
+    version: '0.0.20',
+    date: '2026-02-04',
+    title: 'UX de Processamento e Performance',
+    type: 'improvement',
+    changes: [
+      'Modal de processamento contextual: overlay apenas na página do talhão',
+      'Dashboard mostra status "Processando" no card sem modal global',
+      'Botão de acesso ao talhão bloqueado durante processamento',
+      'Novo endpoint leve /api/fields/[id]/status para polling eficiente',
+      'Correção de loops de re-renderização no polling',
+      'Navegação livre durante processamento em background',
+    ],
+  },
+  {
+    version: '0.0.19',
+    date: '2026-02-04',
+    title: '[BETA] Fusão Adaptativa SAR-NDVI',
+    type: 'feature',
+    changes: [
+      'Fusão de dados Sentinel-1 (SAR) com NDVI óptico usando Machine Learning',
+      'Seleção automática de features (VH, VV ou VV+VH) por talhão',
+      'Modelos GPR e KNN para estimar NDVI em períodos nublados',
+      'Ajuste de confiança de colheita baseado em fonte de dados',
+      'Toggle BETA nas configurações com explicação detalhada',
+    ],
+  },
   {
     version: '0.0.18',
     date: '2026-02-03',

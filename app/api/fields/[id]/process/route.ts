@@ -11,6 +11,14 @@ import { getThermalDataForField, serializeThermalData } from '@/lib/services/the
 import { getClimateEnvelopeForField, serializeClimateEnvelope } from '@/lib/services/climate-envelope.service'
 import { getS1DataForField, serializeS1Data } from '@/lib/services/sentinel1.service'
 import { getFusedNdviForField, serializeFusionResult, calculateFusionQuality, FusionResult } from '@/lib/services/ndvi-fusion.service'
+import { findCoincidentPairs, collectRviNdviPairs, trainLocalModel, getCalibrationStats } from '@/lib/services/rvi-calibration.service'
+import { isFeatureEnabled } from '@/lib/services/feature-flags.service'
+import { 
+  fuseSarNdvi, 
+  isSarFusionEnabled, 
+  calculateHarvestConfidence,
+  FusionResult as AdaptiveFusionResult 
+} from '@/lib/services/sar-ndvi-adaptive.service'
 
 interface RouteParams {
   params: { id: string }
@@ -308,10 +316,84 @@ export async function POST(
       }
 
       // =======================================================
+      // CALIBRAÇÃO RVI-NDVI LOCAL (coleta de pares e treinamento)
+      // =======================================================
+      let calibrationStats: { pairsCount: number, hasModel: boolean, modelR2: number | null, modelRmse: number | null, lastTrainingDate: Date | null } | null = null
+      
+      if (field.workspaceId && radarData) {
+        try {
+          const radarParsed = JSON.parse(radarData)
+          
+          // Converter NDVI do Merx para formato de coleta
+          const opticalForCalibration = merxReport.ndvi.map((pt: any) => ({
+            date: pt.date,
+            ndvi: pt.ndvi_smooth || pt.ndvi_raw || pt.ndvi_interp,
+            cloudCover: pt.cloud_cover
+          }))
+          
+          // Encontrar pares coincidentes NDVI-RVI (tolerância de 1 dia)
+          const coincidentPairs = findCoincidentPairs(
+            opticalForCalibration,
+            radarParsed.rviTimeSeries || [],
+            1  // tolerância em dias
+          )
+          
+          // Coletar pares no banco de dados
+          let pairsCollected = 0
+          if (coincidentPairs.length > 0) {
+            pairsCollected = await collectRviNdviPairs(params.id, coincidentPairs)
+          }
+          
+          console.log(`[PROCESS] RVI Calibration: ${pairsCollected} pares coletados`)
+          
+          // Verificar se podemos treinar modelo local
+          const useLocalCalibration = await isFeatureEnabled(field.workspaceId, 'useLocalCalibration')
+          
+          if (useLocalCalibration && pairsCollected > 0) {
+            calibrationStats = await getCalibrationStats(params.id)
+            
+            // Treinar modelo se temos dados suficientes e não temos modelo ainda
+            const minPairsForTraining = 15
+            if (calibrationStats && calibrationStats.pairsCount >= minPairsForTraining && !calibrationStats.hasModel) {
+              console.log('[PROCESS] Treinando modelo local de calibração RVI-NDVI...')
+              const trainingResult = await trainLocalModel(params.id, field.cropType || 'SOJA')
+              
+              if (trainingResult) {
+                console.log('[PROCESS] Modelo local treinado com sucesso:', {
+                  a: trainingResult.coefficientA.toFixed(4),
+                  b: trainingResult.coefficientB.toFixed(4),
+                  r2: trainingResult.rSquared.toFixed(3),
+                  samples: trainingResult.sampleCount
+                })
+                // Atualizar stats
+                calibrationStats = await getCalibrationStats(params.id)
+              } else {
+                console.log('[PROCESS] Treinamento falhou - dados insuficientes ou R² muito baixo')
+              }
+            } else if (calibrationStats?.hasModel) {
+              console.log('[PROCESS] Modelo local já existe com R²:', calibrationStats.modelR2?.toFixed(3))
+            }
+          }
+        } catch (calibrationError) {
+          console.warn('[PROCESS] Erro na calibração RVI (continuando):', calibrationError)
+        }
+      }
+
+      // =======================================================
       // FUSÃO NDVI ÓPTICO + RADAR (se feature habilitada e dados disponíveis)
       // =======================================================
       let fusionData: string | null = null
-      let fusionMetrics: { gapsFilled: number, maxGapDays: number, radarContribution: number, continuityScore: number } | null = null
+      let fusionMetrics: { 
+        gapsFilled: number, 
+        maxGapDays: number, 
+        radarContribution: number, 
+        continuityScore: number, 
+        calibrationR2?: number,
+        fusionMethod?: string,
+        featureUsed?: string,
+        isBeta?: boolean
+      } | null = null
+      let adaptiveFusionResult: AdaptiveFusionResult | null = null
       
       if (field.workspaceId && radarData) {
         try {
@@ -324,51 +406,154 @@ export async function POST(
             cloudCover: pt.cloud_cover
           }))
           
-          // Executar fusão
-          const fusionResult = await getFusedNdviForField(
-            field.workspaceId,
-            opticalData,
-            radarParsed.rviTimeSeries || [],
-            field.cropType || 'SOJA'
-          )
+          // Verificar se fusão adaptativa (BETA) está habilitada
+          const useAdaptiveFusion = await isSarFusionEnabled(field.workspaceId)
           
-          if (fusionResult && fusionResult.gapsFilled > 0) {
-            fusionData = serializeFusionResult(fusionResult)
+          if (useAdaptiveFusion) {
+            // ==========================================
+            // FUSÃO ADAPTATIVA (BETA) - GPR/KNN
+            // ==========================================
+            console.log('[PROCESS] Using BETA SAR-NDVI Adaptive Fusion')
             
-            // Calcular métricas de qualidade
-            const quality = calculateFusionQuality(fusionResult)
+            // Preparar dados SAR (usar dados históricos se disponíveis)
+            const sarData = radarParsed.radarHistorical?.data || radarParsed.data || []
+            const sarPoints = sarData.map((d: any) => ({
+              date: d.date,
+              vv: d.vv,
+              vh: d.vh
+            })).filter((d: any) => d.vv !== undefined && d.vh !== undefined)
             
-            // Calcular maior gap (para cálculo de confiança)
-            const sortedPoints = fusionResult.points
-              .map(p => new Date(p.date).getTime())
-              .sort((a, b) => a - b)
-            
-            let maxGapDays = 0
-            for (let i = 0; i < sortedPoints.length - 1; i++) {
-              const gap = (sortedPoints[i + 1] - sortedPoints[i]) / (1000 * 60 * 60 * 24)
-              maxGapDays = Math.max(maxGapDays, gap)
+            if (sarPoints.length >= 5) {
+              adaptiveFusionResult = await fuseSarNdvi(
+                params.id,
+                opticalData,
+                sarPoints
+              )
+              
+              if (adaptiveFusionResult && adaptiveFusionResult.gapsFilled > 0) {
+                fusionData = JSON.stringify(adaptiveFusionResult)
+                
+                // Calcular maior gap
+                const sortedPoints = adaptiveFusionResult.points
+                  .map(p => new Date(p.date).getTime())
+                  .sort((a, b) => a - b)
+                
+                let maxGapDays = 0
+                for (let i = 0; i < sortedPoints.length - 1; i++) {
+                  const gap = (sortedPoints[i + 1] - sortedPoints[i]) / (1000 * 60 * 60 * 24)
+                  maxGapDays = Math.max(maxGapDays, gap)
+                }
+                
+                const sarRatio = adaptiveFusionResult.sarFusedPoints / 
+                  (adaptiveFusionResult.opticalPoints + adaptiveFusionResult.sarFusedPoints)
+                
+                fusionMetrics = {
+                  gapsFilled: adaptiveFusionResult.gapsFilled,
+                  maxGapDays,
+                  radarContribution: sarRatio,
+                  continuityScore: adaptiveFusionResult.modelR2 > 0.5 ? 0.9 : 0.8,
+                  calibrationR2: adaptiveFusionResult.modelR2,
+                  fusionMethod: adaptiveFusionResult.fusionMethod,
+                  featureUsed: adaptiveFusionResult.featureUsed,
+                  isBeta: true
+                }
+                
+                console.log('[PROCESS] BETA Adaptive Fusion:', {
+                  opticalPoints: adaptiveFusionResult.opticalPoints,
+                  sarFusedPoints: adaptiveFusionResult.sarFusedPoints,
+                  gapsFilled: adaptiveFusionResult.gapsFilled,
+                  method: adaptiveFusionResult.fusionMethod,
+                  feature: adaptiveFusionResult.featureUsed,
+                  r2: adaptiveFusionResult.modelR2
+                })
+              }
+            } else {
+              console.log('[PROCESS] Not enough SAR data for adaptive fusion, falling back')
             }
+          }
+          
+          // Fallback para fusão clássica se adaptativa não executou
+          if (!adaptiveFusionResult || adaptiveFusionResult.gapsFilled === 0) {
+            // ==========================================
+            // FUSÃO CLÁSSICA (RVI-based)
+            // ==========================================
+            const fusionResult = await getFusedNdviForField(
+              field.workspaceId,
+              opticalData,
+              radarParsed.rviTimeSeries || [],
+              field.cropType || 'SOJA',
+              params.id
+            )
             
-            fusionMetrics = {
-              gapsFilled: fusionResult.gapsFilled,
-              maxGapDays,
-              radarContribution: quality.radarContribution,
-              continuityScore: quality.continuityScore
+            if (fusionResult && fusionResult.gapsFilled > 0) {
+              fusionData = serializeFusionResult(fusionResult)
+              
+              const quality = calculateFusionQuality(fusionResult)
+              
+              const sortedPoints = fusionResult.points
+                .map(p => new Date(p.date).getTime())
+                .sort((a, b) => a - b)
+              
+              let maxGapDays = 0
+              for (let i = 0; i < sortedPoints.length - 1; i++) {
+                const gap = (sortedPoints[i + 1] - sortedPoints[i]) / (1000 * 60 * 60 * 24)
+                maxGapDays = Math.max(maxGapDays, gap)
+              }
+              
+              fusionMetrics = {
+                gapsFilled: fusionResult.gapsFilled,
+                maxGapDays,
+                radarContribution: quality.radarContribution,
+                continuityScore: quality.continuityScore,
+                calibrationR2: fusionResult.calibrationR2,
+                isBeta: false
+              }
+              
+              console.log('[PROCESS] Classic NDVI Fusion:', {
+                opticalPoints: fusionResult.opticalPoints,
+                radarPoints: fusionResult.radarPoints,
+                gapsFilled: fusionResult.gapsFilled,
+                method: fusionResult.fusionMethod
+              })
+            } else {
+              console.log('[PROCESS] Fusion not executed or no gaps to fill')
             }
-            
-            console.log('[PROCESS] NDVI Fusion:', {
-              opticalPoints: fusionResult.opticalPoints,
-              radarPoints: fusionResult.radarPoints,
-              gapsFilled: fusionResult.gapsFilled,
-              maxGapDays,
-              method: fusionResult.fusionMethod
-            })
-          } else {
-            console.log('[PROCESS] Fusion not executed or no gaps to fill')
           }
         } catch (fusionError) {
-          console.warn('[PROCESS] Erro na fusão NDVI (continuando):', fusionError)
+          console.warn('[PROCESS] Erro na fusão NDVI (continuando sem fusão):', fusionError)
+          // Fallback gracioso: continua sem fusão, usando apenas dados ópticos
         }
+      }
+
+      // =======================================================
+      // AJUSTE DE CONFIANÇA BASEADO NA FUSÃO SAR-NDVI
+      // =======================================================
+      let adjustedConfidence = phenology.confidenceScore
+      let confidenceNote = ''
+      
+      if (adaptiveFusionResult && adaptiveFusionResult.calibrationUsed) {
+        // Calcular ajuste de confiança baseado na fusão adaptativa
+        const harvestConfidence = calculateHarvestConfidence(
+          adaptiveFusionResult,
+          phenology.confidenceScore
+        )
+        adjustedConfidence = harvestConfidence.confidence
+        confidenceNote = harvestConfidence.note
+        
+        console.log('[PROCESS] Harvest confidence adjusted:', {
+          original: phenology.confidenceScore,
+          adjusted: adjustedConfidence,
+          source: harvestConfidence.source,
+          note: confidenceNote
+        })
+      }
+      
+      // Atualizar phenology com confiança ajustada (mantém original se não há fusão)
+      const finalConfidenceScore = Math.round(adjustedConfidence)
+      
+      // Adicionar nota de fusão às métricas
+      if (fusionMetrics && confidenceNote) {
+        fusionMetrics = { ...fusionMetrics, confidenceNote } as any
       }
 
       // Salvar ou atualizar AgroData
@@ -383,7 +568,7 @@ export async function POST(
           peakDate: phenology.peakDate ? new Date(phenology.peakDate) : null,
           cycleDays: phenology.cycleDays,
           phenologyMethod: phenology.method,
-          confidenceScore: phenology.confidenceScore,
+          confidenceScore: finalConfidenceScore,
           confidence: phenology.confidence,
           historicalCorrelation: finalCorrelation,
           detectedReplanting: phenology.detectedReplanting,
@@ -395,7 +580,7 @@ export async function POST(
           rawPrecipData: precipitationData || JSON.stringify(merxReport.precipitacao),
           rawSoilData: JSON.stringify(merxReport.solo),
           rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
-          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData, fusion: fusionData, fusionMetrics }),
+          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData, fusion: fusionData, fusionMetrics, calibrationStats, confidenceNote }),
           rawZarcData: JSON.stringify(complementary.zarc_anual),
           zarcWindowStart: zarcAnalysis.window?.windowStart || null,
           zarcWindowEnd: zarcAnalysis.window?.windowEnd || null,
@@ -416,7 +601,7 @@ export async function POST(
           peakDate: phenology.peakDate ? new Date(phenology.peakDate) : null,
           cycleDays: phenology.cycleDays,
           phenologyMethod: phenology.method,
-          confidenceScore: phenology.confidenceScore,
+          confidenceScore: finalConfidenceScore,
           confidence: phenology.confidence,
           historicalCorrelation: finalCorrelation,
           detectedReplanting: phenology.detectedReplanting,
@@ -428,7 +613,7 @@ export async function POST(
           rawPrecipData: precipitationData || JSON.stringify(merxReport.precipitacao),
           rawSoilData: JSON.stringify(merxReport.solo),
           rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
-          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData, fusion: fusionData, fusionMetrics }),
+          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData, fusion: fusionData, fusionMetrics, calibrationStats, confidenceNote }),
           rawZarcData: JSON.stringify(complementary.zarc_anual),
           zarcWindowStart: zarcAnalysis.window?.windowStart || null,
           zarcWindowEnd: zarcAnalysis.window?.windowEnd || null,

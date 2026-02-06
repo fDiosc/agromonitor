@@ -66,6 +66,8 @@ model WorkspaceSettings {
   // ===== CÁLCULOS AVANÇADOS =====
   // Controla se algoritmos usam esses dados nos cálculos
   useRadarForGaps        Boolean @default(false)  // Usar radar para preencher gaps NDVI
+  useLocalCalibration    Boolean @default(false)  // Treinar modelo local RVI->NDVI por talhão
+  enableSarNdviFusion    Boolean @default(false)  // [BETA] Fusão adaptativa SAR-NDVI com GPR/KNN
   useGddForEos           Boolean @default(false)  // Usar GDD na projeção de EOS
   useWaterBalanceAdjust  Boolean @default(false)  // Ajustar EOS por balanço hídrico
   usePrecipitationAdjust Boolean @default(true)   // Ajustar colheita por precipitação
@@ -289,6 +291,8 @@ model Field {
   ndviData NdviDataPoint[]
   logisticsDistances FieldLogisticsDistance[]
   dataStatus FieldDataStatus?
+  rviCalibrations RviNdviCalibration[]
+  rviNdviPairs RviNdviPair[]
 
   @@index([workspaceId])
   @@index([workspaceId, status])
@@ -491,3 +495,51 @@ model NdviDataPoint {
   @@index([fieldId, date])
 }
 
+// ==================== CALIBRAÇÃO RVI-NDVI ====================
+// Baseado em: Pelta et al. (2022) "SNAF: Sentinel-1 to NDVI for Agricultural Fields"
+
+model RviNdviCalibration {
+  id       String @id @default(cuid())
+  fieldId  String
+  field    Field  @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  
+  // Coeficientes do modelo: NDVI = a * RVI + b
+  coefficientA  Float    // Slope
+  coefficientB  Float    // Intercept
+  rSquared      Float    // Qualidade do ajuste (R²)
+  rmse          Float    // RMSE do modelo
+  sampleCount   Int      // Número de pares usados
+  
+  // Período do treinamento
+  trainPeriodStart DateTime
+  trainPeriodEnd   DateTime
+  
+  // Metadados
+  cropType      String    // SOJA | MILHO
+  isActive      Boolean   @default(true)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([fieldId, cropType])
+  @@index([fieldId])
+}
+
+model RviNdviPair {
+  id      String   @id @default(cuid())
+  fieldId String
+  field   Field    @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  
+  date       DateTime
+  ndviValue  Float     // NDVI óptico observado
+  rviValue   Float     // RVI calculado do radar
+  
+  // Qualidade
+  cloudCover Float?    // % nuvens no óptico
+  quality    Float     // 0-1
+  
+  createdAt DateTime @default(now())
+  
+  @@unique([fieldId, date])
+  @@index([fieldId, date])
+}

@@ -106,9 +106,11 @@ export default function DashboardPage() {
     return () => {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
       }
     }
-  }, [fetchFields, fetchLogisticsUnits])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Executar apenas uma vez na montagem
 
   // Filtrar campos
   const filteredFields = useMemo(() => {
@@ -172,7 +174,7 @@ export default function DashboardPage() {
 
   const handleReprocess = async (id: string) => {
     if (!confirm('Reprocessar irá buscar novos dados e recalcular análises. Continuar?')) return
-
+    
     setReprocessing(id)
     
     // Atualizar status para PROCESSING localmente
@@ -180,54 +182,15 @@ export default function DashboardPage() {
       f.id === id ? { ...f, status: 'PROCESSING' } : f
     ))
 
-    // Iniciar processamento (fire and forget - não esperar resposta)
-    // O processamento pode levar até 5 minutos, então não esperamos
+    // Iniciar processamento (fire and forget)
     fetch(`/api/fields/${id}/process`, { method: 'POST' })
-      .catch(err => console.log('Process request sent (timeout expected for long processes):', err.message))
+      .catch(err => console.log('Process request sent:', err.message))
 
-    // Polling para verificar quando terminar
-    const pollInterval = 10000 // 10 segundos
-    const maxPolls = 36 // 6 minutos máximo
-    let polls = 0
-
-    const checkStatus = async (): Promise<void> => {
-      polls++
-      try {
-        const res = await fetch(`/api/fields/${id}`)
-        if (res.ok) {
-          const field = await res.json()
-          
-          if (field.status === 'SUCCESS' || field.status === 'PARTIAL') {
-            // Processamento concluído com sucesso
-            await fetchFields()
-            setReprocessing(null)
-            return
-          } else if (field.status === 'ERROR') {
-            // Processamento falhou
-            alert(`Erro no processamento: ${field.errorMessage || 'Erro desconhecido'}`)
-            await fetchFields()
-            setReprocessing(null)
-            return
-          } else if (field.status === 'PROCESSING' && polls < maxPolls) {
-            // Ainda processando, continuar polling
-            setTimeout(checkStatus, pollInterval)
-            return
-          }
-        }
-      } catch (error) {
-        console.error('Error checking field status:', error)
-      }
-
-      // Timeout ou erro - atualizar lista de qualquer forma
-      if (polls >= maxPolls) {
-        console.log('Polling timeout - processing may still be running')
-      }
-      await fetchFields()
+    // O polling automático em fetchFields vai atualizar o status
+    // Limpar reprocessing state após um tempo para desbloquear botão
+    setTimeout(() => {
       setReprocessing(null)
-    }
-
-    // Iniciar polling após 5 segundos (dar tempo para o processamento começar)
-    setTimeout(checkStatus, 5000)
+    }, 3000)
   }
 
   const clearFilters = () => {

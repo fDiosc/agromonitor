@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppLayout } from '@/components/layout/app-layout'
 import { DisclaimerModal } from '@/components/modals/DisclaimerModal'
+import { ProcessingProvider } from '@/contexts/processing-context'
 
 interface User {
   userId: string
@@ -33,7 +34,7 @@ export function AuthenticatedLayoutClient({
   }
 
   return (
-    <>
+    <ProcessingProvider>
       <DisclaimerModal
         isOpen={showDisclaimer}
         onAccept={handleDisclaimerAccept}
@@ -41,6 +42,6 @@ export function AuthenticatedLayoutClient({
         companyName={user.workspaceName}
       />
       <AppLayout user={user}>{children}</AppLayout>
-    </>
+    </ProcessingProvider>
   )
 }

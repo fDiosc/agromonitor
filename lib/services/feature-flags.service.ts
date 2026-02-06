@@ -27,6 +27,7 @@ export interface FeatureFlags {
 
   // Cálculos avançados
   useRadarForGaps: boolean
+  useLocalCalibration: boolean  // Treinar modelo local RVI->NDVI por talhão
   useGddForEos: boolean
   useWaterBalanceAdjust: boolean
   usePrecipitationAdjust: boolean
@@ -66,6 +67,7 @@ export interface FeatureFlagsUpdate {
 
   // Cálculos avançados
   useRadarForGaps?: boolean
+  useLocalCalibration?: boolean  // Treinar modelo local RVI->NDVI por talhão
   useGddForEos?: boolean
   useWaterBalanceAdjust?: boolean
   usePrecipitationAdjust?: boolean
@@ -107,6 +109,7 @@ const DEFAULT_FLAGS: FeatureFlags = {
 
   // Cálculos avançados
   useRadarForGaps: false,
+  useLocalCalibration: false,  // Desabilitado por padrão (usa coeficientes fixos)
   useGddForEos: false,
   useWaterBalanceAdjust: false,
   usePrecipitationAdjust: true,
@@ -181,6 +184,7 @@ export async function getFeatureFlags(workspaceId: string): Promise<FeatureFlags
     showSatelliteSchedule: settings.showSatelliteSchedule,
 
     useRadarForGaps: settings.useRadarForGaps,
+    useLocalCalibration: settings.useLocalCalibration,
     useGddForEos: settings.useGddForEos,
     useWaterBalanceAdjust: settings.useWaterBalanceAdjust,
     usePrecipitationAdjust: settings.usePrecipitationAdjust,
@@ -305,6 +309,7 @@ export function getFlagsStatus(flags: FeatureFlags): {
 
   // Cálculos
   if (flags.useRadarForGaps) enabledCalculations.push('Radar para Gaps')
+  if (flags.useLocalCalibration) enabledCalculations.push('Calibração Local RVI')
   if (flags.useGddForEos) enabledCalculations.push('GDD para EOS')
   if (flags.useWaterBalanceAdjust) enabledCalculations.push('Ajuste Hídrico')
   if (flags.usePrecipitationAdjust) enabledCalculations.push('Ajuste Precipitação')
