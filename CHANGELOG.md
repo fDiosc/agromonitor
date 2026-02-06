@@ -22,6 +22,42 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.27] - 2026-02-06
+
+### Redesign do Modal de Processamento
+
+Reformulação completa do modal de processamento com design moderno e profissional.
+
+**Visual Moderno**:
+- Header com gradiente emerald/teal (cores da marca MERX)
+- Padrões decorativos de fundo para visual premium
+- Ícone de satélite com backdrop blur e animação suave
+- Badge destacado mostrando tempo decorrido
+
+**Indicadores de Progresso Aprimorados**:
+- Barra de progresso com contador "X de Y etapas"
+- Etapa atual exibida no header
+- Cards de etapas com bordas coloridas por status
+- Ícones circulares numerados (pendente) ou com símbolo (completo/erro)
+
+**Animações e Interações**:
+- Entrada com fade-in e zoom suave
+- Animação de bounce (3 pontos) para etapa em execução
+- Transições suaves entre estados
+- Backdrop clicável para voltar ao dashboard
+
+**UX Melhorado**:
+- Botão "Voltar para Dashboard" escuro e destacado
+- Scroll automático se houver muitas etapas
+- Mensagem clara sobre processamento em background
+
+**Técnico**:
+- Componente refatorado em `contexts/processing-context.tsx`
+- Função `getStepStyles()` para estilos dinâmicos por status
+- Animações CSS nativas (sem dependências)
+
+---
+
 ## [0.0.26] - 2026-02-04
 
 ### UX de Processamento e Performance

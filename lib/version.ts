@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.0.20'
+export const APP_VERSION = '0.0.27'
 
 // Fases do produto
 export const VERSION_PHASES = {
@@ -26,7 +26,21 @@ export const CHANGELOG: ChangelogEntry[] = [
   // Changelog consolidado - apenas features finais implementadas
   
   {
-    version: '0.0.20',
+    version: '0.0.27',
+    date: '2026-02-06',
+    title: 'Redesign do Modal de Processamento',
+    type: 'improvement',
+    changes: [
+      'Header com gradiente emerald/teal (cores MERX) e padrões decorativos',
+      'Badge de tempo decorrido destacado',
+      'Cards de etapas com ícones numerados e status coloridos',
+      'Animação de bounce para etapa em execução',
+      'Botão "Voltar para Dashboard" escuro e destacado',
+      'Backdrop clicável para navegação rápida',
+    ],
+  },
+  {
+    version: '0.0.26',
     date: '2026-02-04',
     title: 'UX de Processamento e Performance',
     type: 'improvement',
@@ -40,7 +54,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     ],
   },
   {
-    version: '0.0.19',
+    version: '0.0.25',
     date: '2026-02-04',
     title: '[BETA] Fusão Adaptativa SAR-NDVI',
     type: 'feature',
