@@ -1,7 +1,8 @@
 'use client'
 
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react'
-import { Loader2, Satellite, CheckCircle, XCircle, AlertTriangle, X } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Loader2, Satellite, CheckCircle, XCircle, AlertTriangle, ArrowLeft } from 'lucide-react'
 
 // ==================== Types ====================
 
@@ -193,6 +194,7 @@ interface ProcessingModalProps {
 }
 
 export function ProcessingModal({ fieldName, steps, startTime, onClose }: ProcessingModalProps) {
+  const router = useRouter()
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
 
   useEffect(() => {
@@ -241,25 +243,14 @@ export function ProcessingModal({ fieldName, steps, startTime, onClose }: Proces
       <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
         {/* Header */}
         <div className="bg-gradient-to-br from-blue-600 to-purple-700 p-6 text-white">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center">
-                <Satellite size={28} className="animate-pulse" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold">{fieldName}</h3>
-                <p className="text-white/80 text-sm">Processando dados...</p>
-              </div>
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center">
+              <Satellite size={28} className="animate-pulse" />
             </div>
-            {onClose && (
-              <button 
-                onClick={onClose}
-                className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
-                title="Sair (processamento continua)"
-              >
-                <X size={18} />
-              </button>
-            )}
+            <div>
+              <h3 className="text-lg font-bold">{fieldName}</h3>
+              <p className="text-white/80 text-sm">Processando dados...</p>
+            </div>
           </div>
           
           {/* Progress bar */}
@@ -303,7 +294,17 @@ export function ProcessingModal({ fieldName, steps, startTime, onClose }: Proces
         </div>
 
         {/* Footer */}
-        <div className="px-6 pb-6">
+        <div className="px-6 pb-6 space-y-3">
+          <button
+            onClick={() => {
+              onClose?.()
+              router.push('/')
+            }}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors"
+          >
+            <ArrowLeft size={18} />
+            Voltar para Dashboard
+          </button>
           <p className="text-xs text-slate-400 text-center">
             Você pode sair desta página. O processamento continua em segundo plano.
           </p>
