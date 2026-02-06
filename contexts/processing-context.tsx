@@ -200,7 +200,6 @@ export function ProcessingModal({ fieldName, steps, startTime, onClose }: Proces
   useEffect(() => {
     if (!startTime) return
     
-    // Set initial elapsed time
     setElapsedSeconds(Math.floor((Date.now() - startTime.getTime()) / 1000))
     
     const interval = setInterval(() => {
@@ -213,100 +212,162 @@ export function ProcessingModal({ fieldName, steps, startTime, onClose }: Proces
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
-    return mins > 0 ? `${mins}m ${secs}s` : `${seconds}s`
-  }
-
-  const getStepIcon = (step: ProcessingStep) => {
-    switch (step.status) {
-      case 'completed':
-        return <CheckCircle size={18} className="text-green-500" />
-      case 'running':
-        return <Loader2 size={18} className="animate-spin text-blue-500" />
-      case 'error':
-        return <XCircle size={18} className="text-red-500" />
-      case 'warning':
-        return <AlertTriangle size={18} className="text-amber-500" />
-      default:
-        return <div className="w-[18px] h-[18px] rounded-full border-2 border-slate-300" />
-    }
+    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
   }
 
   const completedSteps = steps.filter(s => s.status === 'completed').length
   const currentStep = steps.find(s => s.status === 'running')
+  const progressPercent = steps.length > 0 ? (completedSteps / steps.length) * 100 : 0
+
+  const getStepStyles = (status: ProcessingStep['status']) => {
+    switch (status) {
+      case 'completed':
+        return {
+          bg: 'bg-emerald-50 border-emerald-200',
+          icon: 'bg-emerald-500',
+          text: 'text-emerald-700',
+          iconElement: <CheckCircle size={16} className="text-white" />
+        }
+      case 'running':
+        return {
+          bg: 'bg-blue-50 border-blue-200',
+          icon: 'bg-blue-500',
+          text: 'text-blue-700',
+          iconElement: <Loader2 size={16} className="text-white animate-spin" />
+        }
+      case 'error':
+        return {
+          bg: 'bg-red-50 border-red-200',
+          icon: 'bg-red-500',
+          text: 'text-red-700',
+          iconElement: <XCircle size={16} className="text-white" />
+        }
+      case 'warning':
+        return {
+          bg: 'bg-amber-50 border-amber-200',
+          icon: 'bg-amber-500',
+          text: 'text-amber-700',
+          iconElement: <AlertTriangle size={16} className="text-white" />
+        }
+      default:
+        return {
+          bg: 'bg-slate-50 border-slate-200',
+          icon: 'bg-slate-300',
+          text: 'text-slate-400',
+          iconElement: <div className="w-2 h-2 rounded-full bg-white" />
+        }
+    }
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop com blur */}
-      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
+      <div 
+        className="absolute inset-0 bg-slate-900/70 backdrop-blur-md"
+        onClick={() => {
+          onClose?.()
+          router.push('/')
+        }}
+      />
       
       {/* Modal */}
-      <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-        {/* Header */}
-        <div className="bg-gradient-to-br from-blue-600 to-purple-700 p-6 text-white">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center">
-              <Satellite size={28} className="animate-pulse" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-300">
+        
+        {/* Header com gradiente MERX */}
+        <div className="relative bg-gradient-to-br from-emerald-600 via-emerald-500 to-teal-600 px-6 py-8">
+          {/* Padrão decorativo */}
+          <div className="absolute inset-0 opacity-10">
+            <div className="absolute top-0 right-0 w-40 h-40 bg-white rounded-full -translate-y-1/2 translate-x-1/2" />
+            <div className="absolute bottom-0 left-0 w-32 h-32 bg-white rounded-full translate-y-1/2 -translate-x-1/2" />
+          </div>
+          
+          <div className="relative flex items-start gap-4">
+            {/* Ícone animado */}
+            <div className="flex-shrink-0 w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center border border-white/30">
+              <Satellite size={32} className="text-white animate-pulse" />
             </div>
-            <div>
-              <h3 className="text-lg font-bold">{fieldName}</h3>
-              <p className="text-white/80 text-sm">Processando dados...</p>
+            
+            <div className="flex-1 min-w-0">
+              <h3 className="text-xl font-bold text-white truncate">{fieldName}</h3>
+              <p className="text-emerald-100 text-sm mt-0.5">Processando dados de satélite...</p>
+              
+              {/* Tempo decorrido */}
+              <div className="mt-3 flex items-center gap-2">
+                <div className="px-3 py-1 bg-white/20 backdrop-blur-sm rounded-full">
+                  <span className="text-white text-sm font-medium">{formatTime(elapsedSeconds)}</span>
+                </div>
+                <span className="text-emerald-100 text-xs">decorrido</span>
+              </div>
             </div>
           </div>
           
-          {/* Progress bar */}
-          <div className="mt-4">
-            <div className="flex justify-between text-xs text-white/70 mb-1">
-              <span>{currentStep?.label || 'Finalizando...'}</span>
-              <span>{formatTime(elapsedSeconds)}</span>
+          {/* Barra de progresso */}
+          <div className="relative mt-6">
+            <div className="flex justify-between text-xs text-white/80 mb-2">
+              <span className="font-medium">{currentStep?.label || 'Finalizando...'}</span>
+              <span>{completedSteps} de {steps.length}</span>
             </div>
-            <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+            <div className="h-2.5 bg-white/20 rounded-full overflow-hidden">
               <div 
-                className="h-full bg-white rounded-full transition-all duration-500"
-                style={{ width: `${(completedSteps / steps.length) * 100}%` }}
+                className="h-full bg-white rounded-full transition-all duration-700 ease-out"
+                style={{ width: `${progressPercent}%` }}
               />
             </div>
           </div>
         </div>
 
-        {/* Steps */}
-        <div className="p-6 space-y-3">
-          {steps.map((step) => (
-            <div 
-              key={step.id}
-              className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${
-                step.status === 'completed' ? 'bg-green-50' :
-                step.status === 'running' ? 'bg-blue-50' :
-                step.status === 'error' ? 'bg-red-50' :
-                'bg-slate-50'
-              }`}
-            >
-              {getStepIcon(step)}
-              <span className={`text-sm font-medium ${
-                step.status === 'completed' ? 'text-green-700' :
-                step.status === 'running' ? 'text-blue-700' :
-                step.status === 'error' ? 'text-red-700' :
-                'text-slate-400'
-              }`}>
-                {step.label}
-              </span>
-            </div>
-          ))}
+        {/* Lista de etapas */}
+        <div className="px-6 py-5 max-h-[280px] overflow-y-auto">
+          <div className="space-y-2">
+            {steps.map((step, index) => {
+              const styles = getStepStyles(step.status)
+              return (
+                <div 
+                  key={step.id}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all duration-300 ${styles.bg}`}
+                >
+                  {/* Ícone com número */}
+                  <div className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center ${styles.icon}`}>
+                    {step.status === 'pending' ? (
+                      <span className="text-xs font-bold text-white">{index + 1}</span>
+                    ) : (
+                      styles.iconElement
+                    )}
+                  </div>
+                  
+                  {/* Label */}
+                  <span className={`text-sm font-medium flex-1 ${styles.text}`}>
+                    {step.label}
+                  </span>
+                  
+                  {/* Indicador de running */}
+                  {step.status === 'running' && (
+                    <div className="flex gap-1">
+                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
 
         {/* Footer */}
-        <div className="px-6 pb-6 space-y-3">
+        <div className="px-6 pb-6 pt-2 border-t border-slate-100">
           <button
             onClick={() => {
               onClose?.()
               router.push('/')
             }}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-4 py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-medium rounded-xl transition-all duration-200 shadow-lg shadow-slate-900/20 hover:shadow-xl hover:shadow-slate-900/30"
           >
             <ArrowLeft size={18} />
             Voltar para Dashboard
           </button>
-          <p className="text-xs text-slate-400 text-center">
-            Você pode sair desta página. O processamento continua em segundo plano.
+          <p className="text-xs text-slate-400 text-center mt-3">
+            O processamento continua em segundo plano
           </p>
         </div>
       </div>
