@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.0.27'
+export const APP_VERSION = '0.0.28'
 
 // Fases do produto
 export const VERSION_PHASES = {
@@ -25,6 +25,18 @@ export const CHANGELOG: ChangelogEntry[] = [
   // ==================== ALPHA (0.0.x) ====================
   // Changelog consolidado - apenas features finais implementadas
   
+  {
+    version: '0.0.28',
+    date: '2026-02-06',
+    title: 'Gestão Avançada de Talhões',
+    type: 'feature',
+    changes: [
+      'Renomear talhões diretamente pela interface',
+      'Migrar talhões entre produtores com aviso visual',
+      'Atribuição manual de caixa logística por talhão',
+      'Acessível nas abas Produtores e Gerenciar Talhões',
+    ],
+  },
   {
     version: '0.0.27',
     date: '2026-02-06',

@@ -22,6 +22,32 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.28] - 2026-02-06
+
+### Gestão Avançada de Talhões
+
+Nova funcionalidade de edição de talhões com opções de renomear e migrar entre produtores.
+
+**Renomear Talhão**:
+- Botão de edição (lápis) disponível na listagem de talhões
+- Modal intuitivo para alterar nome do talhão
+- Validação de nome obrigatório
+
+**Migrar Talhão para Outro Produtor**:
+- Seletor dropdown com todos os produtores do workspace
+- Aviso visual quando produtor será alterado: "O talhão será migrado para outro produtor"
+- Opção de desvincular talhão de qualquer produtor
+
+**Alterar Caixa Logística**:
+- Atribuição manual de caixa logística por talhão
+- Override da atribuição automática por raio
+
+**Acesso**:
+- Aba Produtores: expandir produtor → botão de edição no talhão
+- Aba Gerenciar Talhões: botão de edição em cada linha da tabela
+
+---
+
 ## [0.0.27] - 2026-02-06
 
 ### Redesign do Modal de Processamento
