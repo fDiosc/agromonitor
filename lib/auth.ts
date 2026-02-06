@@ -50,14 +50,8 @@ export async function createToken(payload: JWTPayload): Promise<string> {
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
     const { payload } = await jwtVerify(token, JWT_SECRET)
-    // #region agent log
-    console.log('[DEBUG-AUTH] verifyToken success, userId:', (payload as any).userId)
-    // #endregion
     return payload as unknown as JWTPayload
-  } catch (err) {
-    // #region agent log
-    console.log('[DEBUG-AUTH] verifyToken FAILED:', (err as Error).message)
-    // #endregion
+  } catch {
     return null
   }
 }
