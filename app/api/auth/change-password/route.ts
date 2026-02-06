@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import {
   getSession,
+  getAuthCookie,
+  verifyToken,
   verifyPassword,
   hashPassword,
   createToken,
@@ -12,8 +14,25 @@ import {
 
 export async function POST(request: Request) {
   try {
+    // #region agent log
+    const debugToken = await getAuthCookie()
+    console.log('[DEBUG-H1] auth-token cookie exists:', !!debugToken, debugToken ? `length=${debugToken.length}` : 'null')
+    // #endregion
+    
     const session = await getSession()
+    
+    // #region agent log
+    console.log('[DEBUG-H2] session result:', session ? { userId: session.userId, email: session.email } : 'null')
+    // #endregion
+    
     if (!session) {
+      // #region agent log
+      if (debugToken) {
+        const verifyResult = await verifyToken(debugToken)
+        console.log('[DEBUG-H2b] token verify result:', verifyResult ? 'valid' : 'invalid/expired')
+      }
+      console.log('[DEBUG] Returning unauthorized - no session')
+      // #endregion
       return unauthorizedResponse()
     }
 
