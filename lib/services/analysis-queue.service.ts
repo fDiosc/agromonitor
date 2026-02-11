@@ -212,6 +212,17 @@ async function processAnalysis(item: QueueItem): Promise<void> {
     throw new Error(`Template não encontrado: ${item.templateId}`)
   }
   
+  // Extrair EOS fusionado (NDVI + GDD + balanço hídrico) se disponível
+  let bestEosDate = field.agroData.eosDate?.toISOString().split('T')[0] || null
+  if (field.agroData.rawAreaData) {
+    try {
+      const areaData = JSON.parse(field.agroData.rawAreaData)
+      if (areaData.fusedEos?.date) {
+        bestEosDate = areaData.fusedEos.date
+      }
+    } catch { /* ignore */ }
+  }
+
   // Montar contexto para análise
   const context: AnalysisContext = {
     field: {
@@ -228,7 +239,7 @@ async function processAnalysis(item: QueueItem): Promise<void> {
       volumeEstimatedKg: field.agroData.volumeEstimatedKg,
       plantingDate: field.agroData.plantingDate?.toISOString().split('T')[0] || null,
       sosDate: field.agroData.sosDate?.toISOString().split('T')[0] || null,
-      eosDate: field.agroData.eosDate?.toISOString().split('T')[0] || null,
+      eosDate: bestEosDate,
       peakDate: field.agroData.peakDate?.toISOString().split('T')[0] || null,
       cycleDays: field.agroData.cycleDays,
       confidenceScore: field.agroData.confidenceScore,
@@ -241,7 +252,7 @@ async function processAnalysis(item: QueueItem): Promise<void> {
     phenology: {
       plantingDate: field.agroData.plantingDate?.toISOString().split('T')[0] || null,
       sosDate: field.agroData.sosDate?.toISOString().split('T')[0] || null,
-      eosDate: field.agroData.eosDate?.toISOString().split('T')[0] || null,
+      eosDate: bestEosDate,
       peakDate: field.agroData.peakDate?.toISOString().split('T')[0] || null,
       cycleDays: field.agroData.cycleDays || 120,
       detectedReplanting: field.agroData.detectedReplanting,
@@ -257,7 +268,31 @@ async function processAnalysis(item: QueueItem): Promise<void> {
       diagnostics: field.agroData.diagnostics 
         ? JSON.parse(field.agroData.diagnostics) 
         : []
-    }
+    },
+    // AI Visual Validation (if available)
+    aiValidation: field.agroData.aiValidationResult ? (() => {
+      try {
+        const agreement = field.agroData.aiValidationAgreement
+          ? JSON.parse(field.agroData.aiValidationAgreement)
+          : {}
+        const alerts = field.agroData.aiVisualAlerts
+          ? JSON.parse(field.agroData.aiVisualAlerts)
+          : []
+        return {
+          agreement: field.agroData.aiValidationResult as 'CONFIRMED' | 'QUESTIONED' | 'REJECTED',
+          confidence: field.agroData.aiValidationConfidence || 0,
+          eosAdjustedDate: agreement.eosAdjustedDate || null,
+          eosAdjustmentReason: agreement.eosAdjustmentReason || null,
+          stageAgreement: agreement.stageAgreement ?? true,
+          visualAlerts: alerts,
+          harvestReadiness: agreement.harvestReadiness || { ready: false, estimatedDate: null, notes: '' },
+          riskAssessment: agreement.riskAssessment || { overallRisk: 'MEDIUM', factors: [] },
+          recommendations: agreement.recommendations || [],
+        }
+      } catch {
+        return null
+      }
+    })() : null
   }
   
   // Executar análise diretamente (sem HTTP)

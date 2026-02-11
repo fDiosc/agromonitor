@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.0.28'
+export const APP_VERSION = '0.0.31'
 
 // Fases do produto
 export const VERSION_PHASES = {
@@ -25,6 +25,52 @@ export const CHANGELOG: ChangelogEntry[] = [
   // ==================== ALPHA (0.0.x) ====================
   // Changelog consolidado - apenas features finais implementadas
   
+  {
+    version: '0.0.31',
+    date: '2026-02-11',
+    title: 'Dashboard Avançado: Ordenação e Filtros',
+    type: 'improvement',
+    changes: [
+      'Tabela com 13 colunas individuais ordenáveis (clique no cabeçalho)',
+      'Ordenação padrão por colheita prevista mais próxima',
+      'Filtro de janela de colheita: Passada, 30d, 60d, 90d',
+      'Filtro de confiança do modelo: Alta, Média, Baixa',
+      'Filtro de validação IA: Com/Sem IA, Confirmado/Questionado/Rejeitado',
+      'Correção: dados de IA não apareciam (campo invertido na API)',
+      'Otimização: processamento server-side de JSON pesados',
+      'Card IA: adicionados Landsat 8/9 e Sentinel-3 OLCI nos sensores',
+    ],
+  },
+  {
+    version: '0.0.30',
+    date: '2026-02-11',
+    title: 'Correção Pipeline EOS (Single Source of Truth)',
+    type: 'fix',
+    changes: [
+      'Fusão EOS: corrigido fallback para "hoje" quando colheita já passou',
+      'GDD: backtracking para encontrar data exata de maturação (100% GDD)',
+      'Mapeamento de stress hídrico PT→EN corrigido na integração',
+      'API de talhão agora usa EOS fusionado (não bruto) para janela de colheita',
+      'Relatório prioriza EOS do servidor, eliminando divergência client/server',
+      'Schema do Juiz IA alinhado: ready, overallRisk, factors[]',
+      'Critérios de decisão quantitativos para CONFIRMED/QUESTIONED/REJECTED',
+      'Normalização bidirecional de dados antigos/novos no painel IA',
+    ],
+  },
+  {
+    version: '0.0.29',
+    date: '2026-02-11',
+    title: 'Validação Visual por IA Multimodal',
+    type: 'feature',
+    changes: [
+      'Agentes Curador + Juiz analisam imagens de satélite com Gemini',
+      'Pipeline completo: busca de imagens, curadoria, validação visual',
+      'Três modos de trigger: Manual, Automático, Baixa Confiança',
+      'Painel de resultados no relatório com concordância, alertas e recomendações',
+      'Configurável por workspace via Settings > Módulos e Visualizações',
+      'Suporte multi-sensor: Sentinel-2, Sentinel-1, Landsat, Sentinel-3',
+    ],
+  },
   {
     version: '0.0.28',
     date: '2026-02-06',

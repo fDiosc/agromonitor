@@ -57,26 +57,38 @@ O MERX AGRO Monitor segue uma arquitetura Full-Stack com Next.js, onde o fronten
 │  │  │   cycle     │  │  geometry   │  │    auth     │              │   │
 │  │  │  analysis   │  │   service   │  │   (JWT)     │              │   │
 │  │  └─────────────┘  └─────────────┘  └─────────────┘              │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │   │
+│  │  │ eos-fusion  │  │  thermal    │  │water-balance│              │   │
+│  │  │  service    │  │   (GDD)     │  │   service   │              │   │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘              │   │
+│  │  ┌─────────────────────────────────────────────────┐              │   │
+│  │  │            AI VALIDATION LAYER (v0.0.29)         │              │   │
+│  │  │  ┌───────────┐  ┌───────────┐  ┌────────────┐  │              │   │
+│  │  │  │  Curator  │  │   Judge   │  │Orchestrator│  │              │   │
+│  │  │  │  Agent    │  │   Agent   │  │  Service   │  │              │   │
+│  │  │  └───────────┘  └───────────┘  └────────────┘  │              │   │
+│  │  └─────────────────────────────────────────────────┘              │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
                 │                    │                    │
-                ▼                    ▼                    ▼
-┌──────────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│     PostgreSQL       │  │    Merx API      │  │   Gemini AI      │
-│   (Neon Cloud)       │  │   (Satellite)    │  │   (Analysis)     │
-│                      │  │                  │  │                  │
-│  ┌────────────────┐  │  │  - NDVI          │  │  - Template      │
-│  │   Workspace    │  │  │  - Precipitação  │  │    prompts       │
-│  ├────────────────┤  │  │  - Solo          │  │  - Risk          │
-│  │     User       │  │  │  - Histórico     │  │    analysis      │
-│  ├────────────────┤  │  │  - Área lavoura  │  │                  │
-│  │     Field      │  │  │                  │  │                  │
-│  ├────────────────┤  │  └──────────────────┘  └──────────────────┘
-│  │    AgroData    │  │
-│  ├────────────────┤  │
-│  │    Analysis    │  │
-│  └────────────────┘  │
-└──────────────────────┘
+       ┌────────┼────────┬───────────┼───────────┐       │
+       ▼        │        ▼           ▼           ▼       ▼
+┌────────────┐  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐
+│ PostgreSQL │  │  │ Merx API │  │Gemini AI │  │  Sentinel Hub    │
+│(Neon Cloud)│  │  │(Satellite│  │(Templates│  │  Process API     │
+│            │  │  │ + Clima) │  │+ Visual) │  │  (Sat. Images)   │
+│┌──────────┐│  │  │          │  │          │  │                  │
+││Workspace  ││  │  │ - NDVI   │  │- Template│  │ - True Color     │
+│├──────────┤│  │  │ - Precip │  │  prompts │  │ - NDVI Colorized │
+││  User    ││  │  │ - Solo   │  │- Curator │  │ - Radar SAR      │
+│├──────────┤│  │  │ - Hist.  │  │  prompt  │  │ - Multi-sensor   │
+││  Field   ││  │  │ - Área   │  │- Judge   │  │   (S2/S1/L8/S3)  │
+│├──────────┤│  │  │ - Temp.  │  │  prompt  │  │                  │
+││ AgroData ││  │  │ - Bal.H. │  │          │  │                  │
+│├──────────┤│  │  └──────────┘  └──────────┘  └──────────────────┘
+││ Analysis ││  │
+│└──────────┘│  │
+└────────────┘  │
 ```
 
 ---
@@ -160,11 +172,19 @@ No primeiro acesso após login, usuários que não aceitaram o disclaimer são a
 - Interação com usuário
 - Validação de formulários
 
+**Dashboard (v0.0.31):**
+- Tabela com 13 colunas individuais ordenáveis (clique no cabeçalho)
+- Ordenação padrão: colheita prevista mais próxima primeiro
+- 7 filtros combinatórios em 2 linhas (logística + fenologia/IA)
+- Processamento server-side de JSON pesados (rawAreaData → fusedEosDate, aiValidationAgreement → harvestReady)
+
 **Componentes Principais:**
 ```
 components/
 ├── fields/
-│   └── field-table.tsx      # Tabela de talhões
+│   └── field-table.tsx      # Tabela ordenável de talhões (13 cols, sorting, Field type export)
+├── ai-validation/
+│   └── AIValidationPanel.tsx # Painel de resultados IA no relatório
 ├── layout/
 │   ├── app-layout.tsx       # Layout principal com sidebar
 │   ├── sidebar.tsx          # Navegação lateral
@@ -233,11 +253,32 @@ app/api/
 |---------|---------|--------|
 | Merx | `merx.service.ts` | Integração com API de satélite |
 | Phenology | `phenology.service.ts` | Detecção de fenologia + EOS dinâmico |
+| EOS Fusion | `eos-fusion.service.ts` | Fusão NDVI + GDD + Balanço Hídrico (single source of truth) |
+| Thermal | `thermal.service.ts` | Soma térmica (GDD) com backtracking de maturação |
+| Water Balance | `water-balance.service.ts` | Balanço hídrico + ajuste EOS por estresse |
+| Climate Envelope | `climate-envelope.service.ts` | Bandas históricas (Bollinger-like) |
+| Precipitation | `precipitation.service.ts` | Dados de precipitação + ajuste colheita |
 | Cycle Analysis | `cycle-analysis.service.ts` | Projeção adaptativa por fase fenológica |
 | Correlation | `correlation.service.ts` | Correlação histórica robusta |
 | Geometry | `geometry.service.ts` | Validação e cálculo de geometrias |
 | Geocoding | `geocoding.service.ts` | Geocodificação reversa |
-| AI | `ai.service.ts` | Integração com Gemini |
+| AI Templates | `ai.service.ts` | Integração com Gemini para análises textuais |
+| AI Validation | `ai-validation.service.ts` | Orquestrador do pipeline de validação visual |
+| Feature Flags | `feature-flags.service.ts` | Configuração de módulos por workspace |
+| Pricing | `pricing.service.ts` | Custos de API (Gemini, Sentinel Hub) |
+| Sentinel-1 | `sentinel1.service.ts` | Integração Radar Copernicus |
+| NDVI Fusion | `ndvi-fusion.service.ts` | Fusão óptico + radar |
+
+**Agentes IA (lib/agents/):**
+
+| Agente | Arquivo | Função |
+|--------|---------|--------|
+| Curator | `curator.ts` | Seleção e pontuação de imagens de satélite |
+| Judge | `judge.ts` | Validação fenológica por visão computacional |
+| Curator Prompt | `curator-prompt.ts` | Template de prompt do Curador |
+| Judge Prompt | `judge-prompt.ts` | Template de prompt do Juiz com critérios de decisão |
+| Types | `types.ts` | Interfaces compartilhadas dos agentes |
+| Evalscripts | `evalscripts.ts` | Scripts Sentinel Hub (S2 True Color, S2 NDVI, S1 Radar, Landsat NDVI, S3 NDVI) |
 
 ### 4. Data Layer (Persistence)
 
@@ -362,6 +403,55 @@ model Analysis {
      └───────────────────────────────────────────────────┘
 ```
 
+### Fluxo de Dados EOS (Single Source of Truth - v0.0.30)
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    CÁLCULO NO SERVIDOR                            │
+│                                                                  │
+│  phenology.service ──→ EOS_NDVI (data bruta por curva)          │
+│  thermal.service   ──→ EOS_GDD (data por soma térmica)          │
+│  water-balance     ──→ stress_level (PT→EN mapping)             │
+│                                                                  │
+│  eos-fusion.service ──→ FUSED EOS (canônico)                    │
+│    ↕ campos: date, method, confidence, passed                    │
+│                                                                  │
+│  process/route.ts                                                │
+│    ├── persiste em agroData.eosDate (NDVI bruto)                │
+│    ├── persiste em rawAreaData.fusedEos (objeto completo)       │
+│    └── salva fusedEosPassed (boolean)                           │
+└───────────────────────────┬──────────────────────────────────────┘
+                            │
+                ┌───────────┼───────────┐
+                ▼           ▼           ▼
+        ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+        │ fields/[id] │ │reports/[id] │ │  logistics  │
+        │  route.ts   │ │  page.tsx   │ │ diagnostic  │
+        │             │ │             │ │             │
+        │ bestEosDate │ │ prioriza    │ │ usa fusedEos│
+        │ = fusedEos  │ │ server EOS  │ │ p/ curva    │
+        │   > bruto   │ │ > client    │ │ recebimento │
+        └─────────────┘ └─────────────┘ └─────────────┘
+```
+
+### Fluxo de Validação Visual IA (v0.0.29)
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│   Trigger    │────▶│  Fetch Sat   │────▶│   Curator    │
+│ MANUAL/AUTO/ │     │  Images via  │     │   Agent      │
+│ LOW_CONF     │     │ Sentinel Hub │     │ (select+rank)│
+└──────────────┘     └──────────────┘     └──────┬───────┘
+                                                  │
+                                                  ▼
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│   Persist    │◀────│  Normalize   │◀────│    Judge     │
+│   AgroData   │     │  Response    │     │    Agent     │
+│  + Analysis  │     │ (PT→EN, old  │     │(multimodal)  │
+└──────────────┘     │  →new schema)│     └──────────────┘
+                     └──────────────┘
+```
+
 ### Fluxo de Diagnóstico Logístico
 
 O módulo de diagnóstico logístico é organizado em **3 abas**:
@@ -418,9 +508,28 @@ Base URL: `https://api.merx.app.br`
 
 ### Google Gemini AI
 
-Modelo: `gemini-pro`
+| Uso | Modelo | SDK |
+|-----|--------|-----|
+| Templates de Análise | `gemini-3-flash-preview` | `@google/genai` |
+| Agente Curador (Visual) | `gemini-2.5-flash-lite` ou `gemini-3-flash-preview` | `@google/genai` |
+| Agente Juiz (Visual) | `gemini-3-flash-preview` | `@google/genai` |
 
-Uso: Geração de análises textuais baseadas em templates.
+**Uso em Templates**: Geração de análises textuais (Crédito, Logística, Risco).
+
+**Uso em Validação Visual (v0.0.29)**: Agentes multimodais que analisam imagens de satélite para confirmar ou questionar projeções algorítmicas de fenologia.
+
+### Sentinel Hub (Copernicus Data Space)
+
+API para busca e processamento de imagens de satélite.
+
+| Sensor | Uso | Evalscript | Condição |
+|--------|-----|------------|----------|
+| Sentinel-2 L2A | True Color (RGB) + NDVI Colorizado | `EVALSCRIPT_TRUE_COLOR`, `EVALSCRIPT_NDVI` | Sempre |
+| Sentinel-1 GRD | Radar Composto SAR (VV/VH) | `EVALSCRIPT_RADAR` | Sempre |
+| Landsat 8/9 | NDVI complementar | `EVALSCRIPT_LANDSAT_NDVI` | Talhões >200ha |
+| Sentinel-3 OLCI | NDVI de larga escala | `EVALSCRIPT_S3_NDVI` | Talhões >500ha |
+
+**Autenticação**: OAuth2 Client Credentials (armazenado em WorkspaceSettings ou `.env`).
 
 ---
 

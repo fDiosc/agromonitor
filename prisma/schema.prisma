@@ -87,6 +87,12 @@ model WorkspaceSettings {
   copernicusClientId        String?                          // OAuth2 Client ID
   copernicusClientSecret    String?                          // OAuth2 Client Secret (criptografado)
 
+  // ===== VALIDACAO VISUAL IA =====
+  enableAIValidation        Boolean @default(false)          // Liga/desliga validação visual
+  aiValidationTrigger       String  @default("MANUAL")       // MANUAL | ON_PROCESS | ON_LOW_CONFIDENCE
+  aiCuratorModel            String  @default("gemini-2.5-flash-lite") // Modelo do Curador
+  showAIValidation          Boolean @default(true)           // Mostrar seção no relatório
+
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -398,6 +404,16 @@ model AgroData {
   // Diagnósticos do processamento
   diagnostics String? // JSON array of diagnostics
 
+  // ===== VALIDACAO VISUAL IA (todos opcionais) =====
+  aiValidationResult     String?    // JSON com resultado completo da validação
+  aiValidationDate       DateTime?  // Data da última validação
+  aiValidationConfidence Int?       // 0-100
+  aiValidationAgreement  String?    // CONFIRMED | QUESTIONED | REJECTED
+  aiEosAdjustedDate      DateTime?  // Data EOS ajustada pela IA
+  aiVisualAlerts         String?    // JSON array de anomalias visuais
+  aiCurationReport       String?    // JSON com relatório do Curador
+  aiCostReport           String?    // JSON com custos (tokens, $)
+
   // Relação 1:1 com Field
   fieldId String @unique
   field   Field  @relation(fields: [fieldId], references: [id], onDelete: Cascade)
@@ -440,6 +456,10 @@ model Analysis {
   reprocessStatus  String?                   // PENDING | PROCESSING | COMPLETED | FAILED
   reprocessError   String?                   // Erro se falhou
   reprocessedAt    DateTime?                 // Última tentativa de reprocessamento
+
+  // ===== VALIDACAO VISUAL IA =====
+  aiValidationUsed       Boolean  @default(false)  // Se validação visual foi usada nesta análise
+  aiValidationAgreement  String?                    // CONFIRMED | QUESTIONED | REJECTED
 
   // Relação com Field
   fieldId String

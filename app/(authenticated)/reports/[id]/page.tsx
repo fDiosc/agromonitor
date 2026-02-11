@@ -7,6 +7,7 @@ import { MetricCards } from '@/components/agro/metric-cards'
 import { PhenologyTimeline } from '@/components/agro/phenology-timeline'
 import { TemplateSelector } from '@/components/templates/template-selector'
 import { AnalysisPanel } from '@/components/templates/analysis-panel'
+import { AIValidationPanel } from '@/components/ai-validation/AIValidationPanel'
 import { PrecipitationChart } from '@/components/charts/PrecipitationChart'
 import { ClimateEnvelopeChart } from '@/components/charts/ClimateEnvelopeChart'
 import { WaterBalanceChart } from '@/components/charts/WaterBalanceChart'
@@ -17,7 +18,7 @@ import { calculateFusedEos, EosFusionInput, EosFusionResult } from '@/lib/servic
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { ArrowLeft, Loader2, TrendingUp, RefreshCw, CloudRain, Droplets, Satellite, Thermometer } from 'lucide-react'
+import { ArrowLeft, Loader2, TrendingUp, RefreshCw, CloudRain, Droplets, Satellite, Thermometer, BrainCircuit } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ProcessingModal, DEFAULT_PROCESSING_STEPS, ProcessingStep } from '@/contexts/processing-context'
 import {
@@ -340,6 +341,8 @@ export default function ReportPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analyzingTemplate, setAnalyzingTemplate] = useState<string | null>(null)
   const [isReprocessing, setIsReprocessing] = useState(false)
+  const [isRunningAIValidation, setIsRunningAIValidation] = useState(false)
+  const [aiValidationError, setAIValidationError] = useState<string | null>(null)
 
   const fetchData = useCallback(async () => {
     try {
@@ -561,6 +564,18 @@ export default function ReportPage() {
           }
           
           const fusionResult = calculateFusedEos(fusionInput)
+          
+          // Se o servidor já calculou o fusedEos, usar essa data como canônica
+          // para garantir que todos os componentes usem a mesma data.
+          // O cálculo client-side ainda fornece os dados do tooltip (factors, explanation etc).
+          if (fieldData.fusedEos?.date) {
+            const serverEos = new Date(fieldData.fusedEos.date)
+            fusionResult.eos = serverEos
+            fusionResult.method = (fieldData.fusedEos.method || fusionResult.method) as EosFusionResult['method']
+            fusionResult.confidence = fieldData.fusedEos.confidence ?? fusionResult.confidence
+            fusionResult.passed = serverEos < new Date(new Date().toISOString().split('T')[0])
+          }
+          
           setEosFusion(fusionResult)
         }
       } catch (e) {
@@ -769,6 +784,31 @@ export default function ReportPage() {
       .catch(() => { /* Request sent */ })
     
     setIsReprocessing(false)
+  }
+
+  const handleRunAIValidation = async () => {
+    if (!fieldId) return
+    setIsRunningAIValidation(true)
+    setAIValidationError(null)
+
+    try {
+      const res = await fetch(`/api/fields/${fieldId}/ai-validate`, {
+        method: 'POST'
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        setAIValidationError(data.error || data.details || 'Erro ao executar validação IA')
+        return
+      }
+
+      // Refresh data to show the new AI validation results
+      await fetchData()
+    } catch (err) {
+      setAIValidationError('Erro de conexão ao executar validação IA')
+    } finally {
+      setIsRunningAIValidation(false)
+    }
   }
 
   const handleSelectTemplate = async (templateId: string) => {
@@ -1285,6 +1325,161 @@ export default function ReportPage() {
           plantingDate={agroData?.plantingDate}
           sosDate={agroData?.sosDate}
         />
+
+        {/* AI Validation Section */}
+        {featureFlags?.enableAIValidation && featureFlags?.showAIValidation !== false && agroData && (
+          <div className="space-y-4">
+            {/* Show panel if validation data exists */}
+            {agroData.aiValidationResult ? (
+              <div className="space-y-3">
+                <AIValidationPanel agroData={agroData} />
+                {/* Re-run button below the panel */}
+                <div className="flex items-center gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRunAIValidation}
+                    disabled={isRunningAIValidation}
+                    className="text-xs text-violet-600 border-violet-300 hover:bg-violet-50"
+                  >
+                    {isRunningAIValidation ? (
+                      <><Loader2 size={14} className="mr-1.5 animate-spin" />Revalidando...</>
+                    ) : (
+                      <><RefreshCw size={14} className="mr-1.5" />Revalidar com IA</>
+                    )}
+                  </Button>
+                  {agroData.aiValidationDate && (
+                    <span className="text-xs text-slate-400">
+                      Última validação: {new Date(agroData.aiValidationDate).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* Trigger button when no validation data yet - WOW design */
+              <div className="relative group">
+                {/* Animated gradient border glow */}
+                <div className="absolute -inset-[1px] rounded-[32px] bg-gradient-to-r from-violet-500 via-purple-500 to-fuchsia-500 opacity-20 group-hover:opacity-40 blur-sm transition-all duration-700" />
+                
+                <Card className="relative p-0 rounded-[32px] border border-violet-200/60 overflow-hidden bg-white">
+                  {/* Top gradient accent bar */}
+                  <div className="h-1 bg-gradient-to-r from-violet-500 via-purple-500 to-fuchsia-500" />
+                  
+                  <div className="p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      {/* Left content */}
+                      <div className="flex items-start gap-4">
+                        {/* Animated AI icon */}
+                        <div className="relative shrink-0">
+                          <div className="absolute inset-0 bg-gradient-to-br from-violet-400 to-fuchsia-400 rounded-2xl blur-md opacity-30 group-hover:opacity-50 transition-opacity duration-500" />
+                          <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
+                            <BrainCircuit size={26} className="text-white" />
+                            {/* Pulse dot */}
+                            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-400 rounded-full border-2 border-white shadow-sm">
+                              <span className="absolute inset-0 bg-emerald-400 rounded-full animate-ping opacity-75" />
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h4 className="text-base font-black text-slate-900">Validação Visual por IA</h4>
+                            <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-gradient-to-r from-violet-100 to-purple-100 text-violet-700 rounded-full">
+                              Multimodal
+                            </span>
+                          </div>
+                          <p className="text-sm text-slate-500 leading-relaxed">
+                            Agentes de IA analisam imagens de satélite em tempo real para validar as projeções algorítmicas de fenologia com visão computacional.
+                          </p>
+                          
+                          {/* Feature pills */}
+                          <div className="flex flex-wrap items-center gap-2 mt-3">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-semibold text-slate-600">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                              Sentinel-2 Óptico
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-semibold text-slate-600">
+                              <span className="w-1.5 h-1.5 rounded-full bg-orange-400" />
+                              Sentinel-1 SAR
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-semibold text-slate-600">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                              Landsat 8/9
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-semibold text-slate-600">
+                              <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
+                              Sentinel-3 OLCI
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-semibold text-slate-600">
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                              NDVI Colorizado
+                            </span>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-semibold text-slate-600">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                              Gemini Vision
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* CTA Button */}
+                      <div className="shrink-0">
+                        <Button
+                          onClick={handleRunAIValidation}
+                          disabled={isRunningAIValidation}
+                          className="relative bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white shadow-lg shadow-violet-500/25 hover:shadow-violet-500/40 transition-all duration-300 px-6 py-2.5 h-auto rounded-xl font-bold"
+                        >
+                          {isRunningAIValidation ? (
+                            <><Loader2 size={18} className="mr-2 animate-spin" />Analisando...</>
+                          ) : (
+                            <><BrainCircuit size={18} className="mr-2" />Executar Validação IA</>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                    
+                    {/* Running state - animated progress */}
+                    {isRunningAIValidation && (
+                      <div className="mt-5 p-4 bg-gradient-to-r from-violet-50 to-purple-50 border border-violet-100 rounded-2xl">
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="relative">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
+                              <Loader2 size={16} className="text-white animate-spin" />
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-violet-900">Pipeline de Validação Visual em Execução</p>
+                            <p className="text-xs text-violet-600">Isso pode levar 30-60 segundos</p>
+                          </div>
+                        </div>
+                        {/* Pipeline steps */}
+                        <div className="grid grid-cols-4 gap-2">
+                          {[
+                            { step: '1', label: 'Buscando imagens', icon: '🛰️' },
+                            { step: '2', label: 'Curadoria IA', icon: '🔍' },
+                            { step: '3', label: 'Análise visual', icon: '🧠' },
+                            { step: '4', label: 'Gerando laudo', icon: '📋' },
+                          ].map((item) => (
+                            <div key={item.step} className="flex items-center gap-2 p-2 bg-white/60 rounded-xl border border-violet-100">
+                              <span className="text-base">{item.icon}</span>
+                              <span className="text-[10px] font-semibold text-violet-700">{item.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              </div>
+            )}
+            {/* Error display */}
+            {aiValidationError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                <strong>Erro:</strong> {aiValidationError}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Template Selector */}
         <div>

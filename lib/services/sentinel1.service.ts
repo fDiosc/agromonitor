@@ -526,3 +526,75 @@ export function deserializeS1Data(json: string | null): S1ProcessingResult | nul
     return null
   }
 }
+
+// ==================== Process API (Imagens) ====================
+
+const PROCESS_URL = 'https://sh.dataspace.copernicus.eu/api/v1/process'
+
+/**
+ * Busca imagem renderizada do CDSE Process API
+ * Reutiliza auth existente do sentinel1.service
+ * Usado pelo pipeline de Validação Visual IA (Curador + Juiz)
+ */
+export async function processImage(
+  workspaceId: string,
+  params: {
+    bbox: [number, number, number, number]
+    dateFrom: string
+    dateTo: string
+    evalscript: string
+    dataCollection: string
+    width?: number
+    height?: number
+  }
+): Promise<Buffer | null> {
+  const accessToken = await getAccessToken(workspaceId)
+  if (!accessToken) return null
+
+  const body = {
+    input: {
+      bounds: {
+        bbox: params.bbox,
+        properties: { crs: 'http://www.opengis.net/def/crs/EPSG/0/4326' }
+      },
+      data: [{
+        dataFilter: {
+          timeRange: { from: params.dateFrom, to: params.dateTo },
+          ...(params.dataCollection.includes('sentinel-2') ||
+              params.dataCollection.includes('landsat')
+              ? { maxCloudCoverage: 100 } : {})
+        },
+        type: params.dataCollection
+      }]
+    },
+    output: {
+      width: params.width ?? 512,
+      height: params.height ?? 512,
+      responses: [{ identifier: 'default', format: { type: 'image/png' } }]
+    },
+    evalscript: params.evalscript
+  }
+
+  try {
+    const response = await fetch(PROCESS_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'image/png'
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60000)
+    })
+
+    if (!response.ok) {
+      console.error('[SENTINEL1] Process image error:', response.status, await response.text().catch(() => ''))
+      return null
+    }
+    const arrayBuffer = await response.arrayBuffer()
+    return Buffer.from(arrayBuffer)
+  } catch (error) {
+    console.error('[SENTINEL1] Process image error:', error)
+    return null
+  }
+}

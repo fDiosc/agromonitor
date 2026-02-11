@@ -45,6 +45,12 @@ export interface FeatureFlags {
   // Credenciais externas (não retornar secrets!)
   copernicusClientId: string | null
   hasCopernicusSecret: boolean  // Indicador se secret está configurado
+
+  // Validação Visual IA
+  enableAIValidation: boolean
+  aiValidationTrigger: 'MANUAL' | 'ON_PROCESS' | 'ON_LOW_CONFIDENCE'
+  aiCuratorModel: string
+  showAIValidation: boolean
 }
 
 export interface FeatureFlagsUpdate {
@@ -85,6 +91,12 @@ export interface FeatureFlagsUpdate {
   // Credenciais externas
   copernicusClientId?: string | null
   copernicusClientSecret?: string | null  // Secret para update (não retornado)
+
+  // Validação Visual IA
+  enableAIValidation?: boolean
+  aiValidationTrigger?: 'MANUAL' | 'ON_PROCESS' | 'ON_LOW_CONFIDENCE'
+  aiCuratorModel?: string
+  showAIValidation?: boolean
 }
 
 // ==================== Default Values ====================
@@ -126,7 +138,13 @@ const DEFAULT_FLAGS: FeatureFlags = {
 
   // Credenciais externas (valores padrão)
   copernicusClientId: null,
-  hasCopernicusSecret: false
+  hasCopernicusSecret: false,
+
+  // Validação Visual IA
+  enableAIValidation: false,
+  aiValidationTrigger: 'MANUAL',
+  aiCuratorModel: 'gemini-2.5-flash-lite',
+  showAIValidation: true,
 }
 
 // Campos virtuais que são calculados, não salvos no banco
@@ -199,7 +217,13 @@ export async function getFeatureFlags(workspaceId: string): Promise<FeatureFlags
 
     // Copernicus - não retornar secret, apenas indicador
     copernicusClientId: settings.copernicusClientId,
-    hasCopernicusSecret: !!settings.copernicusClientSecret
+    hasCopernicusSecret: !!settings.copernicusClientSecret,
+
+    // Validação Visual IA
+    enableAIValidation: settings.enableAIValidation,
+    aiValidationTrigger: settings.aiValidationTrigger as 'MANUAL' | 'ON_PROCESS' | 'ON_LOW_CONFIDENCE',
+    aiCuratorModel: settings.aiCuratorModel,
+    showAIValidation: settings.showAIValidation,
   }
 }
 
@@ -297,6 +321,7 @@ export function getFlagsStatus(flags: FeatureFlags): {
   if (flags.enableThermalSum) enabledModules.push('Soma Térmica')
   if (flags.enableSoilData) enabledModules.push('Dados de Solo')
   if (flags.enableClimateEnvelope) enabledModules.push('Bandas Históricas')
+  if (flags.enableAIValidation) enabledModules.push('Validação Visual IA')
 
   // Visualizações
   if (flags.showPrecipitationChart) enabledVisualizations.push('Gráfico Precipitação')
@@ -306,6 +331,7 @@ export function getFlagsStatus(flags: FeatureFlags): {
   if (flags.showSoilInfo) enabledVisualizations.push('Info Solo')
   if (flags.showClimateEnvelope) enabledVisualizations.push('Envelope Climático')
   if (flags.showSatelliteSchedule) enabledVisualizations.push('Passagens Satélite')
+  if (flags.showAIValidation) enabledVisualizations.push('Validação Visual IA')
 
   // Cálculos
   if (flags.useRadarForGaps) enabledCalculations.push('Radar para Gaps')

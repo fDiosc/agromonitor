@@ -19,8 +19,11 @@ O **MERX AGRO Monitor** é uma plataforma multi-tenant que transforma dados de s
 - **Gráficos Avançados** - GDD, Envelope Climático, Balanço Hídrico, Precipitação
 - **Diagnóstico Logístico** - Visão consolidada para planejamento de recebimento
 - **Caixas Logísticas** - Gestão de armazéns com raio de cobertura
-- **Filtros Avançados** - Por status, caixa logística e tipo de atribuição
+- **Filtros Avançados (v0.0.31)** - Status, tipo, caixa logística, janela de colheita, confiança, presença/resultado IA
+- **Dashboard Ordenável (v0.0.31)** - 13 colunas individuais com ordenação por clique, padrão por colheita mais próxima
 - **Templates de Análise** - Crédito, Logística, Matriz de Risco
+- **Validação Visual IA (v0.0.29)** - Agentes Curador + Juiz validam imagens de satélite com Gemini multimodal (6 fontes de dados)
+- **Fusão EOS Corrigida (v0.0.30)** - Single source of truth: data canônica calculada no servidor
 - **Feature Flags** - Configuração de módulos por workspace
 
 ---
@@ -75,15 +78,16 @@ GEMINI_API_KEY="sua-chave-gemini"
 ┌─────────────────────────────────────────────────────────────────┐
 │                      API ROUTES (Backend)                        │
 │                   Next.js Route Handlers                         │
-│       /api/fields, /api/logistics, /api/templates               │
+│   /api/fields, /api/logistics, /api/templates, /api/ai-validate │
 └─────────────────────────────────────────────────────────────────┘
                                │
-               ┌───────────────┼───────────────┐
-               ▼               ▼               ▼
-        ┌───────────┐   ┌───────────┐   ┌───────────┐
-        │  Prisma   │   │ Merx API  │   │ Gemini AI │
-        │ PostgreSQL│   │ Satellite │   │ Analysis  │
-        └───────────┘   └───────────┘   └───────────┘
+           ┌───────────┬───────┼───────┬───────────┐
+           ▼           ▼       ▼       ▼           ▼
+    ┌───────────┐ ┌─────────┐ ┌─────────┐ ┌────────────┐ ┌──────────┐
+    │  Prisma   │ │Merx API │ │Gemini AI│ │Sentinel Hub│ │AI Agents │
+    │PostgreSQL │ │Satellite│ │Analysis │ │ Process API│ │Curator+  │
+    │  (Neon)   │ │ + Clima │ │Templates│ │  (Images)  │ │  Judge   │
+    └───────────┘ └─────────┘ └─────────┘ └────────────┘ └──────────┘
 ```
 
 ### Stack Tecnológica
@@ -96,7 +100,9 @@ GEMINI_API_KEY="sua-chave-gemini"
 | Maps | Leaflet, React-Leaflet |
 | ORM | Prisma |
 | Database | PostgreSQL (Neon) |
-| AI | Google Gemini |
+| AI (Templates) | Google Gemini 3 Flash Preview |
+| AI (Visual) | Gemini multimodal (Curator + Judge agents) |
+| Satellite Images | Sentinel Hub Process API (Copernicus) |
 | APIs | Merx API (satellite/climate data) |
 
 ---
@@ -142,7 +148,15 @@ merx-agro-mvp/
 │   ├── auth.ts                 # Utilitários de autenticação (JWT)
 │   ├── version.ts              # Versão e changelog
 │   ├── prisma.ts               # Cliente Prisma
+│   ├── agents/                 # Agentes de IA (Visual Validation)
+│   │   ├── curator.ts          # Agente Curador (seleção de imagens)
+│   │   ├── judge.ts            # Agente Juiz (validação fenológica)
+│   │   ├── curator-prompt.ts   # Prompt do Curador
+│   │   ├── judge-prompt.ts     # Prompt do Juiz
+│   │   ├── types.ts            # Tipos compartilhados dos agentes
+│   │   └── evalscripts/        # Scripts Sentinel Hub (NDVI, True Color, Radar)
 │   └── services/               # Serviços de negócio
+│       ├── ai-validation.service.ts     # Orquestrador da validação visual IA
 │       ├── eos-fusion.service.ts        # Fusão EOS (NDVI + GDD + Hídrico)
 │       ├── thermal.service.ts           # Soma térmica (GDD)
 │       ├── water-balance.service.ts     # Balanço hídrico
@@ -150,6 +164,7 @@ merx-agro-mvp/
 │       ├── precipitation.service.ts     # Dados de precipitação
 │       ├── feature-flags.service.ts     # Configuração de módulos
 │       ├── phenology.service.ts         # Cálculos fenológicos
+│       ├── pricing.service.ts           # Custos de API (Gemini, Sentinel Hub)
 │       ├── distance.service.ts          # Cálculo de distâncias
 │       └── logistics-distance.service.ts # Persistência de distâncias
 ├── prisma/
@@ -164,11 +179,11 @@ merx-agro-mvp/
 
 | Documento | Descrição | Status |
 |-----------|-----------|--------|
-| [README.md](./README.md) | Este documento - visão geral | ✅ Atualizado |
-| [CHANGELOG.md](./CHANGELOG.md) | Histórico de mudanças | ✅ Atualizado |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Arquitetura detalhada | ✅ Atualizado |
-| [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md) | **Metodologia V2** - Fusão EOS, GDD, Envelope Climático | ✅ Atualizado |
-| [METHODOLOGY.md](./METHODOLOGY.md) | Metodologias técnicas (legado) | 📦 Legado |
+| [README.md](./README.md) | Este documento - visão geral | ✅ Atualizado (11/02) |
+| [CHANGELOG.md](./CHANGELOG.md) | Histórico de mudanças | ✅ Atualizado (11/02) |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Arquitetura detalhada | ✅ Atualizado (11/02) |
+| [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md) | **Metodologia V2** - Fusão EOS, GDD, Envelope Climático, IA Visual | ✅ Atualizado (11/02) |
+| [METHODOLOGY.md](./METHODOLOGY.md) | Metodologias técnicas | ✅ Atualizado (11/02) |
 | [DIAGNOSTICOLOG.md](./DIAGNOSTICOLOG.md) | Especificação módulo logístico | ✅ Atualizado |
 | [REFATORACAO1.md](./REFATORACAO1.md) | Plano de multi-tenancy e auth | ✅ Concluído |
 
@@ -176,10 +191,12 @@ merx-agro-mvp/
 
 | Documento | Descrição | Status |
 |-----------|-----------|--------|
-| [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md) | Metodologia V2 - Fusão EOS científica | ✅ Atualizado |
+| [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md) | Metodologia V2 - Fusão EOS científica | ✅ Atualizado (11/02) |
+| [docs/PLAN-AI-VISUAL-VALIDATION.md](./docs/PLAN-AI-VISUAL-VALIDATION.md) | Plano de validação visual IA (Curador + Juiz) | ✅ Concluído |
 | [docs/PLAN-HYBRID-ANALYSIS.md](./docs/PLAN-HYBRID-ANALYSIS.md) | Plano de análise híbrida | ✅ Concluído |
 | [docs/PLAN-REPROCESS-ANALYSIS.md](./docs/PLAN-REPROCESS-ANALYSIS.md) | Plano de reprocessamento | ✅ Concluído |
 | [docs/PLAN-ZARC-ALIGNMENT.md](./docs/PLAN-ZARC-ALIGNMENT.md) | Alinhamento ZARC | ✅ Concluído |
+| [docs/REPORT-MERX-NDVI-GAP.md](./docs/REPORT-MERX-NDVI-GAP.md) | Relatório técnico: gap de dados NDVI | ✅ Concluído |
 
 ### Documentos Legados (raiz do projeto)
 
@@ -295,15 +312,27 @@ Gestão de unidades de recebimento:
 - Atribuição de talhões (manual, herdada, automática)
 - Hierarquia: Manual > Produtor > Automático (mais próximo)
 
-### 5. Filtros e Gestão
+### 5. Filtros e Gestão (v0.0.31)
 
-Dashboard com filtros avançados:
+Dashboard com **tabela ordenável** (13 colunas) e **filtros avançados** em 2 linhas:
+
+**Ordenação** (clique em qualquer cabeçalho):
+- Padrão: colheita prevista mais próxima primeiro
+- Suporta: Status, Talhão, Área, Volume, Emergência, Colheita, Confiança, IA, EOS IA, Pronta, Conf. IA
+- Nulls sempre no final, direção inteligente por tipo de dado
+
+**Filtros Linha 1** (logística):
 - Status: Todos, Processado, Processando, Pendente, Erro
+- Tipo de Atribuição: Manual (M), Produtor (P), Automático (A), Sem
 - Caixa Logística: Todas, Sem atribuição, ou específica
-- Tipo de Atribuição: Manual (M), Produtor (P), Automático (A)
+
+**Filtros Linha 2** (fenologia + IA):
+- Janela de Colheita: Passada, 30 dias, 60 dias, 90 dias, Sem data
+- Confiança Modelo: Alta (>75%), Média (40-75%), Baixa (<40%), Sem
+- Validação IA: Com IA, Sem IA
+- Resultado IA: Confirmado, Questionado, Rejeitado
 
 Gerenciamento de talhões:
-- Cards clicáveis como filtros
 - Resolução de interseções (talhões em múltiplos raios)
 - Atribuição manual de caixa logística
 
@@ -316,12 +345,19 @@ Sistema extensível de análises:
 
 ### 7. Fusão EOS (Previsão de Colheita Avançada)
 
-Algoritmo científico para previsão de data de colheita:
+Algoritmo científico para previsão de data de colheita com **Single Source of Truth** (v0.0.30):
 
 **Fontes de Dados Combinadas:**
 - **NDVI Histórico**: Correlação com safras anteriores
 - **Soma Térmica (GDD)**: Growing Degree Days para maturidade fisiológica
 - **Balanço Hídrico**: Ajuste por estresse (acelera senescência)
+
+**Pipeline de Dados (v0.0.30):**
+- Data canônica calculada no servidor (`process/route.ts`) e persistida em `rawAreaData.fusedEos`
+- API de talhão (`fields/[id]/route.ts`) prioriza EOS fusionado para janela de colheita e gráficos
+- Relatório prioriza EOS do servidor, eliminando divergência client/server
+- Campo `passed: boolean` indica se colheita já ocorreu
+- GDD com backtracking para encontrar data exata de maturação
 
 **Metodologias Científicas:**
 | Referência | Aplicação |
@@ -337,6 +373,50 @@ Algoritmo científico para previsão de data de colheita:
 - Alertas de divergência automáticos
 
 > Documentação completa: [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md)
+
+### 8. Validação Visual por IA (v0.0.29)
+
+Pipeline de validação visual que usa IA multimodal para confirmar ou questionar projeções algorítmicas:
+
+**Arquitetura de Agentes:**
+- **Curador**: Seleciona e pontua as melhores imagens de satélite (True Color, NDVI, Radar)
+- **Juiz**: Valida projeções algorítmicas usando visão computacional multimodal
+
+**Modelos IA:**
+| Agente | Modelo | SDK |
+|--------|--------|-----|
+| Curador | `gemini-2.5-flash-lite` ou `gemini-3-flash-preview` | `@google/genai` |
+| Juiz | `gemini-3-flash-preview` | `@google/genai` |
+
+**Imagens de Satélite (Sentinel Hub Process API) — 6 fontes:**
+- **True Color**: Sentinel-2 L2A (R/G/B com correção atmosférica)
+- **NDVI Colorizado**: Escala contínua com legendas de threshold
+- **Radar Composto**: Sentinel-1 GRD (VV/VH, falsa-cor SAR)
+- **Landsat 8/9**: NDVI para talhões >200ha (complementar ao Sentinel-2)
+- **Sentinel-3 OLCI**: NDVI de larga escala para talhões >500ha
+- **Gemini Vision**: Análise multimodal de todas as camadas combinadas
+
+**Modos de Trigger:**
+| Modo | Descrição |
+|------|-----------|
+| `MANUAL` | Botão "Validar por IA" no relatório |
+| `ON_PROCESS` | Automático ao processar talhão |
+| `ON_LOW_CONFIDENCE` | Automático quando confiança < 50% |
+
+**Resultados:**
+- Concordância: `CONFIRMED`, `QUESTIONED`, `REJECTED`
+- EOS ajustado pela IA (com critérios quantitativos)
+- Alertas visuais com severidade (LOW/MEDIUM/HIGH)
+- Recomendações acionáveis do Juiz
+- Fatores de risco categorizados (CLIMATIC/PHYTOSANITARY/OPERATIONAL)
+
+**Configuração (Feature Flags):**
+- `enableAIValidation` - Habilitar pipeline de validação visual
+- `aiValidationTrigger` - Modo de trigger (MANUAL/ON_PROCESS/ON_LOW_CONFIDENCE)
+- `aiCuratorModel` - Modelo do Curador
+- `showAIValidation` - Mostrar painel no relatório
+
+> Documentação completa: [docs/PLAN-AI-VISUAL-VALIDATION.md](./docs/PLAN-AI-VISUAL-VALIDATION.md)
 
 ---
 
@@ -422,6 +502,12 @@ Algoritmo científico para previsão de data de colheita:
 | GET | `/api/admin/workspaces/[id]` | Detalhes do workspace |
 | PUT | `/api/admin/workspaces/[id]` | Atualizar workspace |
 | DELETE | `/api/admin/workspaces/[id]` | Excluir workspace |
+
+### Validação Visual IA
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| POST | `/api/fields/[id]/ai-validate` | Executar validação visual IA (manual) |
 
 ### Utilitários
 

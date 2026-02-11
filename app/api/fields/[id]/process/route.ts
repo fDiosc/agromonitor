@@ -12,13 +12,15 @@ import { getClimateEnvelopeForField, serializeClimateEnvelope } from '@/lib/serv
 import { getS1DataForField, serializeS1Data } from '@/lib/services/sentinel1.service'
 import { getFusedNdviForField, serializeFusionResult, calculateFusionQuality, FusionResult } from '@/lib/services/ndvi-fusion.service'
 import { findCoincidentPairs, collectRviNdviPairs, trainLocalModel, getCalibrationStats } from '@/lib/services/rvi-calibration.service'
-import { isFeatureEnabled } from '@/lib/services/feature-flags.service'
+import { isFeatureEnabled, getFeatureFlags } from '@/lib/services/feature-flags.service'
 import { 
   fuseSarNdvi, 
   isSarFusionEnabled, 
   calculateHarvestConfidence,
   FusionResult as AdaptiveFusionResult 
 } from '@/lib/services/sar-ndvi-adaptive.service'
+import { runAIValidation, type AIValidationResult } from '@/lib/services/ai-validation.service'
+import { calculateFusedEos, type EosFusionResult } from '@/lib/services/eos-fusion.service'
 
 interface RouteParams {
   params: { id: string }
@@ -174,6 +176,8 @@ export async function POST(
       // =======================================================
       let waterBalanceData: string | null = null
       let eosAdjustment: any = null
+      let waterBalStressDays = 0
+      let waterBalYieldImpact = 0
       
       if (field.workspaceId) {
         try {
@@ -194,6 +198,10 @@ export async function POST(
           if (waterBalanceResult) {
             waterBalanceData = serializeWaterBalance(waterBalanceResult.data)
             eosAdjustment = waterBalanceResult.adjustment
+            waterBalStressDays = waterBalanceResult.data.stressDays || 0
+            waterBalYieldImpact = eosAdjustment?.yieldImpact 
+              ? Math.round((1 - eosAdjustment.yieldImpact) * 100) // 0.7 → -30
+              : 0
             
             console.log('[PROCESS] Balanço Hídrico:', {
               totalDeficit: waterBalanceResult.data.totalDeficit.toFixed(1),
@@ -556,6 +564,211 @@ export async function POST(
         fusionMetrics = { ...fusionMetrics, confidenceNote } as any
       }
 
+      // =======================================================
+      // FUSÃO EOS SERVER-SIDE (NDVI + GDD + Balanço Hídrico)
+      // Garante que templates e IA usem o melhor EOS disponível
+      // =======================================================
+      let fusedEosDate: string | null = null
+      let fusedEosMethod: string | null = null
+      let fusedEosConfidence: number | null = null
+      let fusedEosPassed: boolean = false
+
+      try {
+        // Extrair dados GDD do thermalData
+        let gddEos: Date | null = null
+        let gddAccumulated = 0
+        let gddRequired = 0
+        let gddConfidence: 'HIGH' | 'MEDIUM' | 'LOW' = 'LOW'
+
+        if (thermalData) {
+          const thermal = JSON.parse(thermalData)
+          gddAccumulated = thermal.gddAnalysis?.accumulatedGdd || 0
+          gddRequired = thermal.gddAnalysis?.requiredGdd || 0
+          gddConfidence = (thermal.gddAnalysis?.confidence as 'HIGH' | 'MEDIUM' | 'LOW') || 'LOW'
+          if (thermal.gddAnalysis?.projectedEos) {
+            gddEos = new Date(thermal.gddAnalysis.projectedEos)
+          }
+        }
+
+        // Calcular NDVI atual e taxa de declínio
+        const ndviSeries = merxReport.ndvi
+        const lastNdviPt = ndviSeries.length > 0 ? ndviSeries[ndviSeries.length - 1] : null
+        const lastNdvi = lastNdviPt ? (lastNdviPt.ndvi_smooth || lastNdviPt.ndvi_raw || 0) : 0
+
+        let ndviDeclineRate = 0
+        if (ndviSeries.length >= 3) {
+          const recent = ndviSeries.slice(-3)
+          const rates: number[] = []
+          for (let i = 1; i < recent.length; i++) {
+            const prev = recent[i - 1].ndvi_smooth || recent[i - 1].ndvi_raw || 0
+            const curr = recent[i].ndvi_smooth || recent[i].ndvi_raw || 0
+            if (prev > 0) rates.push((prev - curr) / prev * 100)
+          }
+          ndviDeclineRate = rates.length > 0 ? rates.reduce((a: number, b: number) => a + b, 0) / rates.length : 0
+        }
+
+        // Mapear nível de estresse hídrico de Português para Inglês
+        const STRESS_LEVEL_MAP: Record<string, 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'> = {
+          'BAIXO': 'LOW',
+          'MODERADO': 'MEDIUM',
+          'SEVERO': 'HIGH',
+          'CRITICO': 'CRITICAL',
+          // Suporte a valores já em inglês (backward compat)
+          'NONE': 'NONE', 'LOW': 'LOW', 'MEDIUM': 'MEDIUM', 'HIGH': 'HIGH', 'CRITICAL': 'CRITICAL'
+        }
+        
+        // Derivar stressLevel em inglês e usar stressDays do waterBalance (não do eosAdjustment)
+        const mappedStressLevel = STRESS_LEVEL_MAP[eosAdjustment?.stressLevel || ''] || 
+          (waterBalStressDays >= 20 ? 'CRITICAL' : 
+           waterBalStressDays >= 10 ? 'HIGH' : 
+           waterBalStressDays >= 5 ? 'MEDIUM' : 
+           waterBalStressDays > 0 ? 'LOW' : 'NONE')
+
+        const fusionEosResult: EosFusionResult = calculateFusedEos({
+          eosNdvi: phenology.eosDate ? new Date(phenology.eosDate) : null,
+          ndviConfidence: finalConfidenceScore,
+          currentNdvi: lastNdvi,
+          peakNdvi: phenology.peakNdvi || 0,
+          ndviDeclineRate,
+          eosGdd: gddEos,
+          gddConfidence,
+          gddAccumulated,
+          gddRequired,
+          waterStressLevel: mappedStressLevel,
+          stressDays: waterBalStressDays,
+          yieldImpact: waterBalYieldImpact > 0 ? -waterBalYieldImpact : undefined,
+          fusionMetrics: fusionMetrics ? {
+            gapsFilled: fusionMetrics.gapsFilled,
+            maxGapDays: fusionMetrics.maxGapDays,
+            radarContribution: fusionMetrics.radarContribution,
+            continuityScore: fusionMetrics.continuityScore
+          } : undefined,
+          plantingDate: new Date(field.seasonStartDate),
+          cropType: field.cropType,
+        })
+
+        fusedEosDate = fusionEosResult.eos.toISOString().split('T')[0]
+        fusedEosMethod = fusionEosResult.method
+        fusedEosConfidence = fusionEosResult.confidence
+        fusedEosPassed = fusionEosResult.passed
+
+        console.log('[PROCESS] Fused EOS:', {
+          rawNdviEos: phenology.eosDate,
+          gddEos: gddEos?.toISOString().split('T')[0],
+          fusedEos: fusedEosDate,
+          method: fusedEosMethod,
+          confidence: fusedEosConfidence
+        })
+      } catch (fusionError) {
+        console.warn('[PROCESS] EOS Fusion error (using raw EOS):', fusionError)
+      }
+
+      // =======================================================
+      // VALIDAÇÃO VISUAL IA (se feature habilitada)
+      // =======================================================
+      let aiValidationResult: AIValidationResult | null = null
+      
+      if (field.workspaceId) {
+        try {
+          const featureFlags = await getFeatureFlags(field.workspaceId)
+          const shouldRunAI = featureFlags.enableAIValidation && (
+            featureFlags.aiValidationTrigger === 'ON_PROCESS' ||
+            (featureFlags.aiValidationTrigger === 'ON_LOW_CONFIDENCE' && finalConfidenceScore < 50)
+          )
+
+          if (shouldRunAI) {
+            console.log('[PROCESS] Running AI visual validation...')
+
+            // Parse thermal/water balance/precipitation for judge enrichment
+            let gddData = undefined
+            let waterBalData = undefined
+            let precipJudgeData = undefined
+            let zarcJudgeData = undefined
+
+            if (thermalData) {
+              try {
+                const parsed = JSON.parse(thermalData)
+                gddData = {
+                  accumulated: parsed.gddAnalysis?.accumulatedGdd || 0,
+                  required: parsed.gddAnalysis?.requiredGdd || 0,
+                  progress: parsed.gddAnalysis?.progressPercent || 0,
+                  daysToMaturity: parsed.gddAnalysis?.daysToMaturity ?? null,
+                  confidence: parsed.gddAnalysis?.confidence || 'LOW'
+                }
+              } catch { /* ignore */ }
+            }
+
+            if (waterBalanceData) {
+              try {
+                const parsed = JSON.parse(waterBalanceData)
+                waterBalData = {
+                  deficit: parsed.totalDeficit || 0,
+                  stressDays: parsed.stressDays || 0,
+                  stressLevel: eosAdjustment?.stressLevel || 'LOW',
+                  waterAdjustment: eosAdjustment?.adjustmentDays || 0
+                }
+              } catch { /* ignore */ }
+            }
+
+            if (precipitationData) {
+              try {
+                const parsed = JSON.parse(precipitationData)
+                precipJudgeData = {
+                  recentPrecipMm: harvestAdjustment?.recentPrecipMm || parsed.totalMm || 0,
+                  qualityRisk: harvestAdjustment?.grainQualityRisk || 'LOW'
+                }
+              } catch { /* ignore */ }
+            }
+
+            if (complementary.zarc_anual && zarcAnalysis.window) {
+              zarcJudgeData = {
+                plantingStatus: zarcAnalysis.plantingStatus || 'UNKNOWN',
+                plantingRisk: zarcAnalysis.plantingRisk ?? 0,
+                windowStart: zarcAnalysis.window.windowStart?.toISOString().split('T')[0] || '',
+                windowEnd: zarcAnalysis.window.windowEnd?.toISOString().split('T')[0] || ''
+              }
+            }
+
+            aiValidationResult = await runAIValidation({
+              fieldId: params.id,
+              workspaceId: field.workspaceId,
+              geometry: field.geometryJson,
+              cropType: field.cropType,
+              areaHa,
+              plantingDate: phenology.plantingDate,
+              plantingSource: phenology.method,
+              sosDate: phenology.sosDate,
+              eosDate: fusedEosDate || phenology.eosDate,
+              eosMethod: fusedEosMethod ? `FUSION_${fusedEosMethod}` : phenology.method,
+              confidenceScore: finalConfidenceScore,
+              peakNdvi: phenology.peakNdvi,
+              peakDate: phenology.peakDate,
+              phenologyHealth: phenology.phenologyHealth,
+              gddData: gddData,
+              waterBalanceData: waterBalData,
+              precipData: precipJudgeData,
+              zarcData: zarcJudgeData,
+              fusionMetrics: fusionMetrics ? {
+                gapsFilled: fusionMetrics.gapsFilled,
+                radarContribution: fusionMetrics.radarContribution,
+                continuityScore: fusionMetrics.continuityScore
+              } : undefined,
+              curatorModel: featureFlags.aiCuratorModel
+            })
+
+            console.log('[PROCESS] AI Validation:', {
+              agreement: aiValidationResult.agreement,
+              confidence: aiValidationResult.confidence,
+              visualAlerts: aiValidationResult.visualAlerts.length,
+              costUSD: aiValidationResult.costReport.totalCost.toFixed(4)
+            })
+          }
+        } catch (aiError) {
+          console.warn('[PROCESS] Erro na validação visual IA (continuando):', aiError)
+          // Graceful degradation: continue without AI validation
+        }
+      }
+
       // Salvar ou atualizar AgroData
       await prisma.agroData.upsert({
         where: { fieldId: params.id },
@@ -580,7 +793,7 @@ export async function POST(
           rawPrecipData: precipitationData || JSON.stringify(merxReport.precipitacao),
           rawSoilData: JSON.stringify(merxReport.solo),
           rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
-          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData, fusion: fusionData, fusionMetrics, calibrationStats, confidenceNote }),
+          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData, fusion: fusionData, fusionMetrics, calibrationStats, confidenceNote, fusedEos: fusedEosDate ? { date: fusedEosDate, method: fusedEosMethod, confidence: fusedEosConfidence, passed: fusedEosPassed } : null }),
           rawZarcData: JSON.stringify(complementary.zarc_anual),
           zarcWindowStart: zarcAnalysis.window?.windowStart || null,
           zarcWindowEnd: zarcAnalysis.window?.windowEnd || null,
@@ -588,6 +801,24 @@ export async function POST(
           zarcOptimalEnd: zarcAnalysis.window?.optimalEnd || null,
           zarcPlantingRisk: zarcAnalysis.plantingRisk,
           zarcPlantingStatus: zarcAnalysis.plantingStatus !== 'UNKNOWN' ? zarcAnalysis.plantingStatus : null,
+          // Validação Visual IA
+          ...(aiValidationResult ? {
+            aiValidationResult: aiValidationResult.agreement,
+            aiValidationDate: new Date(),
+            aiValidationConfidence: aiValidationResult.confidence,
+            aiValidationAgreement: JSON.stringify({
+              eosAdjustedDate: aiValidationResult.eosAdjustedDate,
+              eosAdjustmentReason: aiValidationResult.eosAdjustmentReason,
+              stageAgreement: aiValidationResult.stageAgreement,
+              harvestReadiness: aiValidationResult.harvestReadiness,
+              riskAssessment: aiValidationResult.riskAssessment,
+              recommendations: aiValidationResult.recommendations,
+            }),
+            aiEosAdjustedDate: aiValidationResult.eosAdjustedDate ? new Date(aiValidationResult.eosAdjustedDate) : null,
+            aiVisualAlerts: JSON.stringify(aiValidationResult.visualAlerts),
+            aiCurationReport: JSON.stringify(aiValidationResult.curationReport),
+            aiCostReport: JSON.stringify(aiValidationResult.costReport),
+          } : {}),
           diagnostics: JSON.stringify(phenology.diagnostics),
           updatedAt: new Date()
         },
@@ -613,7 +844,7 @@ export async function POST(
           rawPrecipData: precipitationData || JSON.stringify(merxReport.precipitacao),
           rawSoilData: JSON.stringify(merxReport.solo),
           rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
-          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData, fusion: fusionData, fusionMetrics, calibrationStats, confidenceNote }),
+          rawAreaData: JSON.stringify({ area_ha: areaHa, harvestAdjustment, waterBalance: waterBalanceData, eosAdjustment, thermal: thermalData, climateEnvelope: climateEnvelopeData, radar: radarData, fusion: fusionData, fusionMetrics, calibrationStats, confidenceNote, fusedEos: fusedEosDate ? { date: fusedEosDate, method: fusedEosMethod, confidence: fusedEosConfidence, passed: fusedEosPassed } : null }),
           rawZarcData: JSON.stringify(complementary.zarc_anual),
           zarcWindowStart: zarcAnalysis.window?.windowStart || null,
           zarcWindowEnd: zarcAnalysis.window?.windowEnd || null,
@@ -621,6 +852,24 @@ export async function POST(
           zarcOptimalEnd: zarcAnalysis.window?.optimalEnd || null,
           zarcPlantingRisk: zarcAnalysis.plantingRisk,
           zarcPlantingStatus: zarcAnalysis.plantingStatus !== 'UNKNOWN' ? zarcAnalysis.plantingStatus : null,
+          // Validação Visual IA
+          ...(aiValidationResult ? {
+            aiValidationResult: aiValidationResult.agreement,
+            aiValidationDate: new Date(),
+            aiValidationConfidence: aiValidationResult.confidence,
+            aiValidationAgreement: JSON.stringify({
+              eosAdjustedDate: aiValidationResult.eosAdjustedDate,
+              eosAdjustmentReason: aiValidationResult.eosAdjustmentReason,
+              stageAgreement: aiValidationResult.stageAgreement,
+              harvestReadiness: aiValidationResult.harvestReadiness,
+              riskAssessment: aiValidationResult.riskAssessment,
+              recommendations: aiValidationResult.recommendations,
+            }),
+            aiEosAdjustedDate: aiValidationResult.eosAdjustedDate ? new Date(aiValidationResult.eosAdjustedDate) : null,
+            aiVisualAlerts: JSON.stringify(aiValidationResult.visualAlerts),
+            aiCurationReport: JSON.stringify(aiValidationResult.curationReport),
+            aiCostReport: JSON.stringify(aiValidationResult.costReport),
+          } : {}),
           diagnostics: JSON.stringify(phenology.diagnostics)
         }
       })

@@ -29,6 +29,29 @@ export interface FieldContext {
   seasonStartDate: string
 }
 
+export interface AIValidationContext {
+  agreement: 'CONFIRMED' | 'QUESTIONED' | 'REJECTED'
+  confidence: number
+  eosAdjustedDate: string | null
+  eosAdjustmentReason: string | null
+  stageAgreement: boolean
+  visualAlerts: Array<{
+    severity: 'LOW' | 'MEDIUM' | 'HIGH'
+    type: string
+    description: string
+  }>
+  harvestReadiness: {
+    ready: boolean
+    estimatedDate: string | null
+    notes: string
+  }
+  riskAssessment: {
+    overallRisk: 'LOW' | 'MEDIUM' | 'HIGH'
+    factors: Array<{ factor: string; level: string; detail: string }>
+  }
+  recommendations: string[]
+}
+
 export interface AnalysisContext {
   field: FieldContext
   agroData: {
@@ -52,6 +75,8 @@ export interface AnalysisContext {
     precipitation?: any[]
     soil?: any
   }
+  /** AI Visual Validation data (available when enableAIValidation is on) */
+  aiValidation?: AIValidationContext | null
 }
 
 // ==================== Template Response ====================

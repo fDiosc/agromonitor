@@ -268,9 +268,23 @@ export function calculateGddAnalysis(
   let confidence: 'HIGH' | 'MEDIUM' | 'LOW' = 'LOW'
   
   if (accumulatedGdd >= total) {
-    // Já atingiu maturação
+    // Já atingiu maturação - retroagir para encontrar quando GDD atingiu 100%
     daysToMaturity = 0
     confidence = 'HIGH'
+    
+    // Percorrer a série de trás para frente para encontrar o ponto onde GDD ultrapassou o total
+    for (let i = pointsWithGdd.length - 1; i >= 1; i--) {
+      const prevAccGdd = pointsWithGdd[i - 1].accumulatedGdd
+      if (prevAccGdd < total) {
+        // GDD cruzou o limiar entre pointsWithGdd[i-1] e pointsWithGdd[i]
+        projectedEos = new Date(pointsWithGdd[i].date)
+        break
+      }
+    }
+    // Se não encontrou (já iniciou acima do total), usar o primeiro ponto
+    if (!projectedEos && pointsWithGdd.length > 0) {
+      projectedEos = new Date(pointsWithGdd[0].date)
+    }
   } else if (pointsWithGdd.length >= 14) {
     // Calcular média de GDD recente (últimos 14 dias)
     const recentPoints = pointsWithGdd.slice(-14)

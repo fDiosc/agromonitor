@@ -1,8 +1,8 @@
 # Metodologia V2 - Detecção de Colheita Avançada
 
-**Versão:** 2.0  
-**Data:** Janeiro 2026  
-**Status:** Implementado (Fase 9 pendente)
+**Versão:** 3.1  
+**Data:** Fevereiro 2026  
+**Status:** Implementado (Fase 9 pendente, IA Visual v0.0.29, EOS Fix v0.0.30, Dashboard v0.0.31)
 
 ---
 
@@ -14,8 +14,10 @@
 4. [Metodologias de Cálculo](#4-metodologias-de-cálculo)
 5. [Feature Flags e Configuração](#5-feature-flags-e-configuração)
 6. [Graceful Degradation](#6-graceful-degradation)
-7. [Status de Implementação](#7-status-de-implementação)
-8. [Referências Bibliográficas](#8-referências-bibliográficas)
+7. [Validação Visual por IA](#7-validação-visual-por-ia-v0029)
+8. [Correção do Pipeline EOS](#8-correção-do-pipeline-eos-v0030)
+9. [Status de Implementação](#9-status-de-implementação)
+10. [Referências Bibliográficas](#10-referências-bibliográficas)
 
 ---
 
@@ -26,6 +28,8 @@ A Metodologia V2 representa uma evolução significativa no sistema de detecçã
 ### Objetivos Principais
 
 - **Maior precisão na detecção de EOS** através da fusão de múltiplas fontes de dados
+- **Single Source of Truth (v0.0.30)**: Data canônica calculada no servidor, eliminando divergências
+- **Validação Visual por IA (v0.0.29)**: Agentes multimodais confirmam ou questionam projeções
 - **Robustez contra falhas** com graceful degradation em cada camada
 - **Transparência** com badges de status indicando a qualidade dos dados
 - **Configurabilidade** por workspace via feature flags
@@ -56,10 +60,20 @@ A Metodologia V2 representa uma evolução significativa no sistema de detecçã
 │                              v                                     │
 │  ┌──────────────────────────────────────────────────────────────┐  │
 │  │                    PROJEÇÕES FINAIS                           │  │
-│  │  • Data de EOS ajustada                                       │  │
-│  │  • Janela de colheita                                         │  │
+│  │  • Data de EOS fusionada (single source of truth - v0.0.30) │  │
+│  │  • Janela de colheita (baseada em fusedEos)                  │  │
 │  │  • Estimativa de produtividade                                │  │
-│  │  • Nível de confiança                                         │  │
+│  │  • Nível de confiança + campo `passed`                        │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                              │                                     │
+│                              v                                     │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │              VALIDAÇÃO VISUAL IA (v0.0.29)                    │  │
+│  │  • Busca de imagens Sentinel Hub (True Color, NDVI, Radar)   │  │
+│  │  • Curador: seleciona melhores imagens                        │  │
+│  │  • Juiz: valida projeções com visão multimodal                │  │
+│  │  • Concordância: CONFIRMED / QUESTIONED / REJECTED            │  │
+│  │  • Feature flag: enableAIValidation                           │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -352,23 +366,27 @@ A fusão de EOS combina múltiplas fontes de dados para determinar a data de col
 | Threshold EOS | MDPI Remote Sensing (2022) | 40% amplitude sazonal NDVI |
 | Estresse Hídrico | Desclaux et al. (2003) | Estresse acelera senescência |
 
-#### Algoritmo de Seleção
+#### Algoritmo de Seleção (atualizado v0.0.30)
 
 ```
 ENTRADA:
   - EOS_NDVI: Data projetada por curva NDVI histórica
-  - EOS_GDD: Data projetada por soma térmica
+  - EOS_GDD: Data projetada por soma térmica (com backtracking v0.0.30)
   - NDVI_atual: Valor NDVI mais recente
   - GDD_progress: Percentual de GDD acumulado
   - taxa_declínio: Taxa de queda do NDVI
-  - estresse_hídrico: Nível de estresse (NONE/LOW/MEDIUM/HIGH/CRITICAL)
+  - estresse_hídrico: Nível de estresse (NONE/LOW/MEDIUM/HIGH/CRITICAL) [EN]
+  - stressDays: Dias de estresse hídrico (de waterBalanceResult.data)
+  - yieldImpact: Impacto na produtividade (%)
 
 PROCESSO:
 
 1. SE GDD >= 100% E NDVI < 0.65 E taxa_declínio > 0.5%:
    → Maturação fisiológica atingida
-   → EOS = EOS_NDVI (ou hoje se já passou)
+   → EOS = EOS_NDVI (ou média ponderada NDVI+GDD)
+   → NÃO usa "hoje" como fallback (fix v0.0.30)
    → Confiança = max(conf_ndvi, conf_gdd)
+   → passed = EOS < hoje (campo adicionado v0.0.30)
 
 2. SE EOS_NDVI já passou E NDVI > 0.7:
    → Planta ainda verde, projeção NDVI desatualizada
@@ -392,11 +410,40 @@ PROCESSO:
    Nota: Estresse hídrico ADIANTA a maturidade, não atrasa.
    Referência: Desclaux et al. (2003) - "Water stress accelerates senescence"
 
+   IMPORTANTE (fix v0.0.30): O mapeamento PT→EN é feito no process/route.ts:
+   CRITICO→CRITICAL, SEVERO→HIGH, MODERADO→MEDIUM, BAIXO→LOW, NENHUM→NONE
+
 5. FALLBACK:
    → Se apenas NDVI disponível: usar EOS_NDVI
    → Se apenas GDD disponível: usar EOS_GDD
    → Se nenhum: projeção com baixa confiança
+
+SAÍDA:
+  - eos: Date         (data canônica)
+  - confidence: number (0-1)
+  - method: string     (NDVI_ONLY | GDD_ONLY | NDVI_GDD_FUSED | ...)
+  - passed: boolean    (true se colheita já ocorreu - v0.0.30)
+  - phenologicalStage: string
+  - explanation: string
+  - factors: string[]
 ```
+
+**Persistência (Single Source of Truth - v0.0.30):**
+
+O resultado da fusão é persistido no servidor em `rawAreaData.fusedEos`:
+
+```json
+{
+  "fusedEos": {
+    "date": "2026-02-17",
+    "method": "NDVI_GDD_FUSED",
+    "confidence": 0.85,
+    "passed": false
+  }
+}
+```
+
+Todos os componentes downstream (API de talhão, relatório, diagnóstico logístico) priorizam este valor canônico sobre cálculos locais.
 
 #### Estágios Fenológicos
 
@@ -485,7 +532,16 @@ Exemplo 2 (Nova Bandeirantes, MT):
 | useWaterBalanceAdjust  | false   | Ajustar EOS por estresse hídrico       |
 | usePrecipitationAdjust | true    | Ajustar colheita por precipitação      |
 
-### 5.4 Credenciais Externas
+### 5.4 Validação Visual IA (v0.0.29)
+
+| Flag                   | Default    | Descrição                              |
+|------------------------|------------|----------------------------------------|
+| enableAIValidation     | false      | Habilita pipeline de validação visual  |
+| aiValidationTrigger    | 'MANUAL'   | Modo: MANUAL / ON_PROCESS / ON_LOW_CONFIDENCE |
+| aiCuratorModel         | 'FLASH_LITE' | Modelo do Curador                    |
+| showAIValidation       | true       | Mostrar painel no relatório            |
+
+### 5.5 Credenciais Externas
 
 | Campo                  | Descrição                              |
 |------------------------|----------------------------------------|
@@ -527,9 +583,165 @@ Cada fonte de dados exibe um badge indicando seu status:
 
 ---
 
-## 7. Status de Implementação
+## 7. Validação Visual por IA (v0.0.29)
 
-### 7.1 Fases Completadas
+### 7.1 Arquitetura de Agentes
+
+O sistema implementa um pipeline de dois agentes de IA multimodal para validar projeções algorítmicas usando imagens de satélite reais.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  PIPELINE DE VALIDAÇÃO VISUAL                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  BUSCA DE IMAGENS (Sentinel Hub Process API)                     │
+│  ├── True Color Sentinel-2 (RGB com correção atmosférica)        │
+│  ├── NDVI Colorizado (escala contínua com legenda)               │
+│  ├── Radar Composto Sentinel-1 (VV/VH falsa-cor)                │
+│  └── Fallback: Landsat 8/9, Sentinel-3 OLCI                     │
+│                                                                  │
+│  CURADOR (gemini-2.5-flash-lite ou gemini-3-flash-preview)       │
+│  ├── Avalia qualidade: nuvens, cobertura, resolução              │
+│  ├── Pontua cada imagem (0-100)                                  │
+│  └── Seleciona top N imagens para o Juiz                         │
+│                                                                  │
+│  JUIZ (gemini-3-flash-preview - multimodal)                      │
+│  ├── Recebe: imagens curadas + dados agronômicos completos       │
+│  │   (NDVI, GDD, precipitação, balanço hídrico, ZARC)            │
+│  ├── Analisa: estágio fenológico visual vs projeção              │
+│  ├── Decide: CONFIRMED / QUESTIONED / REJECTED                  │
+│  ├── Ajusta EOS baseado em evidência visual                      │
+│  └── Emite: alertas visuais + recomendações                      │
+│                                                                  │
+│  NORMALIZAÇÃO (ai-validation.service.ts - v0.0.30)               │
+│  ├── PT → EN: CRITICO→CRITICAL, MODERADO→MEDIUM, etc.           │
+│  ├── Schema: isReady→ready, overall→overallRisk                  │
+│  └── Formato: valida YYYY-MM-DD para eosAdjustedDate             │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 7.2 Critérios de Decisão do Juiz (v0.0.30)
+
+| Concordância | Critério |
+|-------------|----------|
+| **CONFIRMED** | Divergência EOS algorítmico vs visual < 7 dias E estágio fenológico compatível |
+| **QUESTIONED** | Divergência 7-14 dias OU estágio visual parcialmente compatível |
+| **REJECTED** | Divergência > 14 dias OU estágio visual claramente incompatível |
+
+### 7.3 Dados de Saída
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `agreement` | string | CONFIRMED / QUESTIONED / REJECTED |
+| `eosAdjustedDate` | string | Data EOS ajustada pelo Juiz (YYYY-MM-DD) |
+| `confidenceAI` | number | Confiança do Juiz (0-100) |
+| `phenologicalStageVisual` | string | Estágio observado na imagem |
+| `harvestReadiness.ready` | boolean | Se está pronta para colheita |
+| `harvestReadiness.delayRisk` | string | NONE / RAIN / MOISTURE / MATURITY |
+| `riskAssessment.overallRisk` | string | LOW / MEDIUM / HIGH / CRITICAL |
+| `riskAssessment.factors[]` | array | Fatores de risco categorizados |
+| `visualAlerts[]` | array | Alertas visuais com severidade |
+| `recommendations[]` | array | Recomendações acionáveis |
+| `costUsd` | number | Custo acumulado da validação |
+
+### 7.4 Feature Flags
+
+| Flag | Default | Descrição |
+|------|---------|-----------|
+| `enableAIValidation` | false | Habilita pipeline de validação visual |
+| `aiValidationTrigger` | 'MANUAL' | Modo: MANUAL / ON_PROCESS / ON_LOW_CONFIDENCE |
+| `aiCuratorModel` | 'FLASH_LITE' | Modelo do Curador |
+| `showAIValidation` | true | Mostrar painel no relatório |
+
+### 7.5 Evalscripts (Sentinel Hub)
+
+| Script | Sensor | Saída |
+|--------|--------|-------|
+| `trueColorS2.ts` | Sentinel-2 L2A | RGB (B04, B03, B02) com brightness enhance |
+| `ndviColorS2.ts` | Sentinel-2 L2A | NDVI colorizado (vermelho→amarelo→verde) |
+| `radarCompositeS1.ts` | Sentinel-1 GRD | Falsa-cor (VV, VH, VV/VH) |
+| `trueColorL8.ts` | Landsat 8/9 | RGB (B4, B3, B2) |
+| `trueColorS3.ts` | Sentinel-3 OLCI | RGB regional (B8, B6, B4) |
+
+### 7.6 Persistência
+
+Resultados são armazenados em `AgroData`:
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `aiValidationAgreement` | String? | CONFIRMED / QUESTIONED / REJECTED |
+| `aiValidationConfidence` | Float? | 0-100 |
+| `aiVisualAlerts` | String? | JSON array de alertas visuais |
+| `aiRecommendations` | String? | JSON array de recomendações |
+| `aiEosAdjusted` | String? | Data EOS ajustada pelo Juiz |
+| `aiPhenologicalStage` | String? | Estágio fenológico visual |
+| `aiValidationCost` | Float? | Custo em USD |
+| `aiValidationDate` | DateTime? | Data/hora da execução |
+
+---
+
+## 8. Correção do Pipeline EOS (v0.0.30)
+
+### 8.1 Problemas Identificados
+
+Análise extensiva do fluxo de dados revelou 8 bugs que causavam divergência nas datas de colheita entre diferentes componentes:
+
+| Bug | Arquivo | Problema |
+|-----|---------|----------|
+| 1 | `eos-fusion.service.ts` | Fallback para "hoje" quando EOS no passado → data móvel |
+| 2 | `thermal.service.ts` | `projectedEos = null` quando GDD 100% → fusão sem GDD |
+| 3 | `process/route.ts` | Stress level em PT ('CRITICO') vs EN ('CRITICAL') esperado |
+| 4 | `process/route.ts` | `eosAdjustment?.stressDays` inexistente no tipo |
+| 5 | `reports/[id]/page.tsx` | Re-cálculo client-side com inputs diferentes do servidor |
+| 6 | `fields/[id]/route.ts` | `harvestWindowInfo` usando `eosDate` (bruto) vs fusionado |
+| 7 | `judge-prompt.ts` | `isReady`/`overall` vs `ready`/`overallRisk` esperados pela UI |
+| 8 | `judge-prompt.ts` | Sem critérios quantitativos para CONFIRMED/QUESTIONED/REJECTED |
+
+### 8.2 Estratégia: Single Source of Truth
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│               PIPELINE DE DADOS EOS (CORRIGIDO)                  │
+│                                                                  │
+│  SERVIDOR (process/route.ts):                                    │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ 1. phenology.service → EOS_NDVI (data bruta)              │  │
+│  │ 2. thermal.service → EOS_GDD (com backtracking)           │  │
+│  │ 3. water-balance → stress_level (mapeado PT→EN)           │  │
+│  │ 4. eos-fusion.service → FUSED EOS (canônico)              │  │
+│  │ 5. Persiste em rawAreaData.fusedEos                       │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                          │                                       │
+│              ┌───────────┼───────────┐                           │
+│              ▼           ▼           ▼                           │
+│  ┌──────────────┐ ┌──────────┐ ┌──────────────┐                │
+│  │ fields/[id]  │ │reports/  │ │  logistics   │                │
+│  │  route.ts    │ │[id]/page │ │  diagnostic  │                │
+│  │              │ │          │ │              │                │
+│  │ bestEosDate  │ │ server   │ │ usa fusedEos │                │
+│  │ = fusedEos   │ │ EOS >    │ │ p/ curva     │                │
+│  │   > bruto    │ │ client   │ │ recebimento  │                │
+│  └──────────────┘ └──────────┘ └──────────────┘                │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 8.3 Correções Implementadas
+
+1. **eos-fusion.service.ts**: Usa data real de EOS mesmo quando no passado (não "hoje"); campo `passed: boolean`
+2. **thermal.service.ts**: Backtracking na série GDD para encontrar data exata de 100% de acumulação
+3. **process/route.ts**: Mapeamento explícito PT→EN para stress levels; extração correta de `stressDays` de `waterBalanceResult.data`
+4. **reports/[id]/page.tsx**: Prioriza `fusedEos` do servidor sobre cálculo client-side
+5. **fields/[id]/route.ts**: `bestEosDate` prioriza `rawAreaData.fusedEos.date`; retorna `fusedEos` no response
+6. **judge-prompt.ts**: Schema alinhado (`ready`, `overallRisk`, `factors[]`); critérios quantitativos de decisão
+7. **AIValidationPanel.tsx**: Normalização bidirecional old/new schema com mapeamento PT→EN
+8. **ai-validation.service.ts**: Pós-processamento normaliza output do Juiz
+
+---
+
+## 9. Status de Implementação
+
+### 9.1 Fases Completadas
 
 | Fase | Descrição                                          | Status      |
 |------|---------------------------------------------------|-------------|
@@ -542,8 +754,15 @@ Cada fonte de dados exibe um badge indicando seu status:
 | 6    | Dados de Solo                                     | ✅ COMPLETO |
 | 7    | Badges de Status (Graceful Degradation)           | ✅ COMPLETO |
 | 8    | Previsão de Passagens de Satélite                 | ✅ COMPLETO |
+| AI-1 | Agentes IA: Curador + Juiz                        | ✅ COMPLETO |
+| AI-2 | Integração no Processamento                       | ✅ COMPLETO |
+| AI-3 | Enriquecimento de Templates                       | ✅ COMPLETO |
+| AI-4 | Interface de Configuração                         | ✅ COMPLETO |
+| AI-5 | Painel de Validação Visual no Relatório           | ✅ COMPLETO |
+| FIX  | Correção Pipeline EOS (Single Source of Truth)    | ✅ COMPLETO |
+| UI   | Dashboard Avançado: Tabela Ordenável + Filtros    | ✅ COMPLETO |
 
-### 7.2 Fases Pendentes
+### 9.2 Fases Pendentes
 
 | Fase | Descrição                                          | Status      | Requisitos           |
 |------|---------------------------------------------------|-------------|----------------------|
@@ -564,9 +783,9 @@ O sistema de auto-reprocessamento permitirá:
 
 ---
 
-## 8. Referências Bibliográficas
+## 10. Referências Bibliográficas
 
-### 8.1 NDVI e Fenologia
+### 10.1 NDVI e Fenologia
 
 1. **Rouse, J.W. et al. (1974)**  
    "Monitoring vegetation systems in the Great Plains with ERTS"  
@@ -576,7 +795,7 @@ O sistema de auto-reprocessamento permitirá:
    "Intercomparison, interpretation, and assessment of spring phenology in North America"  
    *Global Change Biology*, 15(10), 2335-2359.
 
-### 8.2 Radar e Vegetação
+### 10.2 Radar e Vegetação
 
 3. **Kim, Y. & van Zyl, J.J. (2009)**  
    "A time-series approach to estimate soil moisture using polarimetric radar data"  
@@ -590,7 +809,7 @@ O sistema de auto-reprocessamento permitirá:
    "Understanding the temporal behavior of crops using Sentinel-1 and Sentinel-2-like data for agricultural applications"  
    *Remote Sensing of Environment*, 199, 415-426.
 
-### 8.3 Soma Térmica
+### 10.3 Soma Térmica
 
 6. **McMaster, G.S. & Wilhelm, W.W. (1997)**  
    "Growing degree-days: one equation, two interpretations"  
@@ -600,7 +819,7 @@ O sistema de auto-reprocessamento permitirá:
    "Stages of soybean development"  
    *Iowa State University Special Report*, 80.
 
-### 8.4 Balanço Hídrico
+### 10.4 Balanço Hídrico
 
 8. **Allen, R.G. et al. (1998)**  
    "Crop evapotranspiration: guidelines for computing crop water requirements"  
@@ -610,7 +829,7 @@ O sistema de auto-reprocessamento permitirá:
    "The water balance"  
    *Publications in Climatology*, 8(1).
 
-### 8.5 Fusão de Dados e Detecção de Maturidade
+### 10.5 Fusão de Dados e Detecção de Maturidade
 
 10. **Sakamoto, T. et al. (2020)**  
     "PhenoCrop: An integrated satellite-based framework to estimate physiological growth stages of corn and soybeans"  
@@ -636,7 +855,7 @@ O sistema de auto-reprocessamento permitirá:
     *USDA National Institute of Food and Agriculture*.  
     *Nota: Fusão NDVI + GDD = 77% acurácia milho, 71% soja*
 
-### 8.6 ZARC e Riscos
+### 10.6 ZARC e Riscos
 
 15. **MAPA/EMBRAPA (2023)**  
     "Zoneamento Agrícola de Risco Climático"  
@@ -667,17 +886,31 @@ O sistema de auto-reprocessamento permitirá:
 ```
 merx-agro-mvp/
 ├── lib/
+│   ├── agents/                          # IA Visual Validation (v0.0.29)
+│   │   ├── curator.ts                   # Agente Curador
+│   │   ├── judge.ts                     # Agente Juiz
+│   │   ├── curator-prompt.ts            # Prompt do Curador
+│   │   ├── judge-prompt.ts              # Prompt do Juiz (critérios v0.0.30)
+│   │   └── types.ts                     # Tipos compartilhados
+│   ├── evalscripts.ts                   # Scripts Sentinel Hub (S2 TC, S2 NDVI, S1 Radar, Landsat NDVI, S3 NDVI)
 │   └── services/
+│       ├── ai-validation.service.ts     # Orquestrador IA (v0.0.29)
+│       ├── eos-fusion.service.ts        # Fusão EOS (corrigido v0.0.30)
+│       ├── thermal.service.ts           # GDD (backtracking v0.0.30)
 │       ├── feature-flags.service.ts
 │       ├── precipitation.service.ts
 │       ├── water-balance.service.ts
-│       ├── thermal.service.ts
 │       ├── climate-envelope.service.ts
 │       ├── sentinel1.service.ts
 │       ├── ndvi-fusion.service.ts
+│       ├── pricing.service.ts           # Custos de API
 │       ├── satellite-schedule.service.ts
 │       └── phenology.service.ts
 ├── components/
+│   ├── fields/
+│   │   └── field-table.tsx              # Tabela ordenável 13 cols (v0.0.31)
+│   ├── ai-validation/                   # UI de Validação Visual (v0.0.29)
+│   │   └── AIValidationPanel.tsx        # Painel com normalização (v0.0.30)
 │   ├── charts/
 │   │   ├── PrecipitationChart.tsx
 │   │   ├── WaterBalanceChart.tsx
@@ -691,17 +924,24 @@ merx-agro-mvp/
 │       └── DataSourceBadge.tsx
 ├── app/
 │   ├── api/
-│   │   ├── fields/[id]/process/route.ts
+│   │   ├── fields/
+│   │   │   ├── route.ts                 # GET lista (server-side processing v0.0.31)
+│   │   │   └── [id]/
+│   │   │       ├── route.ts             # GET talhão (fusedEos v0.0.30)
+│   │   │       ├── process/route.ts     # POST (EOS fix + IA v0.0.30)
+│   │   │       └── ai-validate/route.ts # POST validação manual (v0.0.29)
 │   │   └── workspace/settings/route.ts
 │   └── (authenticated)/
-│       ├── reports/[id]/page.tsx
-│       └── settings/page.tsx
+│       ├── page.tsx                     # Dashboard (filtros avançados v0.0.31)
+│       ├── reports/[id]/page.tsx        # Relatório (6 sensores v0.0.31)
+│       └── settings/page.tsx           # Config IA + módulos
 ├── prisma/
-│   └── schema.prisma
+│   └── schema.prisma                    # +AI fields (v0.0.29)
 └── docs/
-    └── METHODOLOGY-V2.md  ← Este documento
+    ├── METHODOLOGY-V2.md                # ← Este documento
+    └── PLAN-AI-VISUAL-VALIDATION.md     # Plano original da IA Visual
 ```
 
 ---
 
-*Documento gerado automaticamente. Última atualização: Janeiro 2026*
+*Documento gerado automaticamente. Última atualização: Fevereiro 2026 (v0.0.31)*

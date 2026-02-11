@@ -16,6 +16,8 @@
    - [Análise Logística](#92-análise-logística)
    - [Matriz de Risco](#93-matriz-de-risco)
 10. [Limitações e Considerações](#10-limitações-e-considerações)
+11. [Validação Visual por IA](#11-validação-visual-por-ia-v0029)
+12. [Transparência de IA](#12-transparência-de-ia)
 
 ---
 
@@ -927,28 +929,128 @@ interface RiskMatrixResult {
 
 ---
 
-## 11. Transparência de IA
+## 11. Validação Visual por IA (v0.0.29)
 
-### 11.1 Modelo Utilizado
+### 11.1 Visão Geral
 
-O sistema utiliza **Google Gemini 3 Flash Preview** para análises qualitativas:
+O sistema implementa um pipeline de validação visual que usa IA multimodal (Google Gemini) para confirmar ou questionar as projeções algorítmicas de fenologia a partir de imagens de satélite reais.
 
-| Característica | Valor |
-|----------------|-------|
-| Modelo | `gemini-3-flash-preview` |
-| SDK | `@google/genai` |
-| Uso | Riscos, recomendações, interpretações |
-| Fallback | Regras automáticas quando IA indisponível |
+### 11.2 Arquitetura de Agentes
 
-### 11.2 Identificação Visual
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  PIPELINE DE VALIDAÇÃO VISUAL                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. BUSCA DE IMAGENS (Sentinel Hub Process API)                  │
+│     ├── True Color (Sentinel-2 L2A)                              │
+│     ├── NDVI Colorizado (com legenda de threshold)               │
+│     └── Radar Composto (Sentinel-1 GRD - VV/VH)                 │
+│                                                                  │
+│  2. AGENTE CURADOR                                               │
+│     ├── Modelo: gemini-2.5-flash-lite (padrão)                   │
+│     ├── Avalia qualidade das imagens (nuvens, cobertura)         │
+│     ├── Pontua cada imagem (0-100)                               │
+│     └── Seleciona as melhores para o Juiz                        │
+│                                                                  │
+│  3. AGENTE JUIZ                                                  │
+│     ├── Modelo: gemini-3-flash-preview                           │
+│     ├── Recebe imagens curadas + dados agronômicos completos     │
+│     ├── Valida estágio fenológico visual vs projeção             │
+│     ├── Ajusta EOS baseado em evidência visual                   │
+│     └── Emite concordância: CONFIRMED / QUESTIONED / REJECTED    │
+│                                                                  │
+│  4. NORMALIZAÇÃO (ai-validation.service.ts)                      │
+│     ├── Mapeia PT → EN (stress levels, risk levels)              │
+│     ├── Converte schema antigo → novo (isReady→ready, etc.)     │
+│     └── Valida formato de datas (YYYY-MM-DD)                     │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 11.3 Critérios de Decisão do Juiz (v0.0.30)
+
+| Concordância | Critério |
+|-------------|----------|
+| **CONFIRMED** | Divergência EOS < 7 dias E estágio fenológico visual compatível |
+| **QUESTIONED** | Divergência EOS 7-14 dias OU estágio visual parcialmente compatível |
+| **REJECTED** | Divergência EOS > 14 dias OU estágio visual claramente incompatível |
+
+### 11.4 Dados de Saída
+
+```typescript
+interface AIValidationResult {
+  agreement: 'CONFIRMED' | 'QUESTIONED' | 'REJECTED'
+  eosAdjustedDate: string              // YYYY-MM-DD
+  confidenceAI: number                 // 0-100
+  phenologicalStageVisual: string      // Estágio observado na imagem
+  harvestReadiness: {
+    ready: boolean
+    estimatedDate: string | null
+    delayRisk: 'NONE' | 'RAIN' | 'MOISTURE' | 'MATURITY'
+    delayDays: number
+    notes: string
+  }
+  riskAssessment: {
+    overallRisk: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+    factors: {
+      category: 'CLIMATIC' | 'PHYTOSANITARY' | 'OPERATIONAL'
+      severity: 'LOW' | 'MEDIUM' | 'HIGH'
+      description: string
+    }[]
+  }
+  visualAlerts: {
+    type: string
+    severity: 'LOW' | 'MEDIUM' | 'HIGH'
+    description: string
+  }[]
+  recommendations: string[]
+  costUsd: number                      // Custo acumulado da validação
+}
+```
+
+### 11.5 Feature Flags
+
+| Flag | Default | Descrição |
+|------|---------|-----------|
+| `enableAIValidation` | false | Habilita pipeline de validação visual |
+| `aiValidationTrigger` | 'MANUAL' | Modo: MANUAL / ON_PROCESS / ON_LOW_CONFIDENCE |
+| `aiCuratorModel` | 'FLASH_LITE' | Modelo do Curador |
+| `showAIValidation` | true | Mostrar painel no relatório |
+
+### 11.6 Integração com Templates
+
+Quando a validação visual está disponível, os dados são injetados no `AnalysisContext`:
+- Templates de Logística, Crédito e Matriz de Risco recebem `aiValidationAgreement`
+- Campo `aiValidationUsed` registrado na análise
+
+---
+
+## 12. Transparência de IA
+
+### 12.1 Modelos Utilizados
+
+O sistema utiliza múltiplos modelos do **Google Gemini**:
+
+| Uso | Modelo | SDK | Contexto |
+|-----|--------|-----|----------|
+| Templates de Análise | `gemini-3-flash-preview` | `@google/genai` | Riscos, recomendações |
+| Agente Curador | `gemini-2.5-flash-lite` (padrão) | `@google/genai` | Seleção de imagens |
+| Agente Juiz | `gemini-3-flash-preview` | `@google/genai` | Validação visual multimodal |
+
+**Fallback**: Regras automáticas quando IA indisponível (tanto para templates quanto validação visual).
+
+### 12.2 Identificação Visual
 
 Todas as análises geradas por modelos de linguagem (LLM) exibem:
 
 - **Badge "Gerado por IA"**: Indicador visual roxo com ícone de sparkles
 - **Badge "Análise por Regras"**: Quando fallback é usado
+- **Badge de Concordância IA**: Confirmado (verde) / Questionado (amarelo) / Rejeitado (vermelho)
 - **Tooltip explicativo**: Ao passar o mouse, exibe como os dados foram calculados
+- **Painel de Validação Visual**: Métricas, alertas e recomendações do Juiz IA
 
-### 11.3 Metodologias por Template
+### 12.3 Metodologias por Template
 
 | Template | Métricas | Fonte de Cálculo |
 |----------|----------|------------------|
@@ -959,7 +1061,7 @@ Todas as análises geradas por modelos de linguagem (LLM) exibem:
 | **Crédito** | Garantia | Volume × preço mercado |
 | **Risco** | Scores | Matriz multidimensional |
 
-### 11.4 Dados ZARC (Zoneamento Agrícola)
+### 12.4 Dados ZARC (Zoneamento Agrícola)
 
 - **Fonte**: Dados oficiais do MAPA (Ministério da Agricultura)
 - **Uso**: Apenas informativo (badge no card de Plantio)
@@ -982,6 +1084,9 @@ Todas as análises geradas por modelos de linguagem (LLM) exibem:
 | 2.1.0 | 2026-01 | Gemini 3 Flash Preview, correção timezone, polling automático |
 | 2.2.0 | 2026-02 | **[BETA] Fusão Adaptativa SAR-NDVI**: GPR/KNN para estimar NDVI de Sentinel-1, seleção adaptativa de features (VH/VV/VV+VH), calibração local por talhão, ajuste de confiança baseado em fonte de dados, fallback gracioso |
 | 2.3.0 | 2026-02 | **UX de Processamento**: Modal contextual na página do talhão, endpoint leve `/api/fields/[id]/status` para polling eficiente, correção de loops de re-renderização |
+| 3.0.0 | 2026-02 | **Validação Visual IA**: Pipeline Curador + Juiz multimodal com Gemini, busca de imagens Sentinel Hub, 3 modos de trigger, normalização PT→EN, critérios de decisão quantitativos |
+| 3.1.0 | 2026-02 | **Correção Pipeline EOS**: Single source of truth, GDD backtracking, mapeamento stress PT→EN, server-side canonical fusedEos, eliminação de divergência client/server |
+| 3.2.0 | 2026-02 | **Dashboard Avançado**: Tabela ordenável com 13 colunas, filtros de janela de colheita/confiança/IA, correção mapeamento de campos AI na API, 6 fontes de dados no card IA |
 
 ---
 

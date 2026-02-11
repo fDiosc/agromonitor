@@ -97,7 +97,16 @@ function buildUserPrompt(context: AnalysisContext): string {
 
 ### DIAGNÓSTICOS
 ${phenology.diagnostics.map(d => `- [${d.type}] ${d.message}`).join('\n') || 'Nenhum diagnóstico'}
-
+${context.aiValidation ? `
+### VALIDAÇÃO VISUAL IA (Imagens de Satélite)
+- Concordância com projeções algorítmicas: ${context.aiValidation.agreement} (Confiança: ${context.aiValidation.confidence}%)
+- Concordância de estágio fenológico: ${context.aiValidation.stageAgreement ? 'SIM' : 'NÃO'}
+- EOS ajustado visualmente: ${context.aiValidation.eosAdjustedDate || 'Sem ajuste'}
+- Risco visual geral: ${context.aiValidation.riskAssessment.overallRisk}
+${context.aiValidation.riskAssessment.factors.length > 0 ? `- Fatores de risco visuais: ${context.aiValidation.riskAssessment.factors.map(f => `${f.factor}(${f.level}): ${f.detail}`).join('; ')}` : ''}
+${context.aiValidation.visualAlerts.length > 0 ? `- Alertas visuais: ${context.aiValidation.visualAlerts.map(a => `[${a.severity}] ${a.type}: ${a.description}`).join('; ')}` : ''}
+- Colheita pronta: ${context.aiValidation.harvestReadiness.ready ? 'SIM' : 'NÃO'}
+` : ''}
 Gere matriz de risco em JSON com:
 {
   "status": "EXCELENTE" | "BOM" | "ATENCAO" | "CRITICO",

@@ -22,6 +22,134 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.31] - 2026-02-11
+
+### Dashboard Avançado: Tabela Ordenável e Filtros Expandidos
+
+Redesign completo da tabela de monitoramento do dashboard com colunas individuais ordenáveis, filtros avançados de fenologia e IA, e correção da exibição de dados de validação visual.
+
+**Tabela Ordenável (13 colunas)**:
+- Cada dado agora é uma coluna independente: Status, Talhão, Área, Volume, Emergência, Colheita, Confiança, IA, EOS IA, Pronta, Conf. IA, Caixa Log., Ações
+- Clique em qualquer cabeçalho para ordenar (asc/desc)
+- Ordenação padrão: colheita prevista mais próxima primeiro
+- Valores nulos sempre aparecem no final, independente da direção
+- Scroll horizontal para telas menores com `min-w-[1200px]`
+
+**Filtros Avançados** (novo layout em 2 linhas):
+- Linha 1: Status, Tipo de atribuição, Caixa logística (existentes, otimizados)
+- Linha 2 (novos):
+  - **Janela de Colheita**: Passada, 30 dias, 60 dias, 90 dias, Sem data
+  - **Confiança Modelo**: Alta (>75%), Média (40-75%), Baixa (<40%), Sem dado
+  - **Validação IA**: Com IA, Sem IA
+  - **Resultado IA**: Confirmado, Questionado, Rejeitado
+
+**Correção: Dados de IA não apareciam no dashboard** (`app/api/fields/route.ts`):
+- Campos `aiValidationResult` e `aiValidationAgreement` estavam com uso invertido na API
+- `aiValidationResult` armazena o agreement ("CONFIRMED"/"QUESTIONED"/"REJECTED")
+- `aiValidationAgreement` armazena JSON detalhado (harvestReadiness, etc.)
+- API agora lê corretamente de cada campo e extrai `harvestReady` do JSON certo
+
+**Otimização de API** (`app/api/fields/route.ts`):
+- Processamento server-side de `rawAreaData` → retorna apenas `fusedEosDate` (string)
+- Processamento server-side de `aiValidationAgreement` JSON → retorna apenas `harvestReady` (boolean)
+- Evita envio de blobs JSON grandes para o client em cada polling
+
+**Card de Validação IA atualizado** (`reports/[id]/page.tsx`):
+- Adicionados sensores faltantes nos feature pills: Landsat 8/9, Sentinel-3 OLCI
+- Total de 6 fontes de dados exibidas: Sentinel-2, Sentinel-1 SAR, Landsat 8/9, Sentinel-3 OLCI, NDVI Colorizado, Gemini Vision
+
+---
+
+## [0.0.30] - 2026-02-11
+
+### Correção do Pipeline de Dados EOS (Single Source of Truth)
+
+Correção crítica do fluxo de dados de fusão EOS que eliminava divergências entre componentes do sistema. Todas as datas de colheita agora convergem para um único valor canônico calculado no servidor.
+
+**Bug 1 - Fusão EOS com fallback incorreto** (`eos-fusion.service.ts`):
+- Quando GDD atingia 100% e a data NDVI já estava no passado, o sistema defaultava para "hoje", criando uma data de colheita móvel
+- **Fix**: Agora usa a data real de EOS (NDVI ou média ponderada com GDD) mesmo quando no passado
+- Adicionado campo `passed: boolean` ao resultado de fusão indicando se a colheita já ocorreu
+
+**Bug 2 - GDD sem data de maturação** (`thermal.service.ts`):
+- Quando GDD acumulado atingia 100%, `projectedEos` ficava como `null`, impedindo uso pelo serviço de fusão
+- **Fix**: Implementado backtracking na série temporal para encontrar a data exata em que 100% do GDD foi atingido
+
+**Bug 3 - Mapeamento de stress hídrico PT→EN** (`process/route.ts`):
+- `water-balance.service` retornava `stressLevel` em português ('CRITICO') mas `eos-fusion.service` esperava inglês ('CRITICAL')
+- **Fix**: Adicionado mapeamento explícito PT→EN antes de passar para a fusão
+
+**Bug 4 - `stressDays` inexistente** (`process/route.ts`):
+- `eosAdjustment?.stressDays` era `undefined` pois `stressDays` vive em `WaterBalanceResult.data`, não em `EosAdjustment`
+- **Fix**: Extraído corretamente de `waterBalanceResult.data.stressDays`
+
+**Bug 5 - Divergência cliente/servidor na fusão** (`reports/[id]/page.tsx`):
+- O relatório recalculava a fusão EOS no client-side com inputs derivados diferentemente do servidor
+- **Fix**: Client agora prioriza `fusedEos` do servidor (API), usando cálculo local apenas para tooltip detalhado
+
+**Bug 6 - API de talhão usa EOS bruto** (`fields/[id]/route.ts`):
+- `harvestWindowInfo` e `chartOverlayData` usavam `agroData.eosDate` (NDVI puro) em vez do fusionado
+- **Fix**: Introduzido `bestEosDate` que prioriza `rawAreaData.fusedEos.date`; API agora retorna `fusedEos` no response
+
+**Bug 7 - Schema do Juiz IA desalinhado** (`judge-prompt.ts`, `AIValidationPanel.tsx`):
+- Prompt usava `isReady`/`overall` (PT) mas panel esperava `ready`/`overallRisk` (EN)
+- `riskAssessment` não tinha array `factors`, apenas strings soltas
+- **Fix**: Schema atualizado para `ready`, `overallRisk`, `factors[]`; normalização bidirecional no panel e no service
+
+**Bug 8 - Critérios de decisão vagos do Juiz** (`judge-prompt.ts`):
+- Juiz não tinha critérios quantitativos para decidir CONFIRMED/QUESTIONED/REJECTED
+- **Fix**: Adicionados critérios explícitos (divergência <7d = CONFIRMED, 7-14d = QUESTIONED, >14d = REJECTED)
+
+**Normalização de Dados**:
+- `ai-validation.service.ts`: Pós-processamento normaliza output do Juiz (PT→EN, old→new schema)
+- `AIValidationPanel.tsx`: Aceita tanto schema antigo quanto novo, com mapeamento graceful
+- `judge.ts`: Parsing resiliente com fallbacks para campos antigos
+
+---
+
+## [0.0.29] - 2026-02-11
+
+### Validação Visual IA (Pipeline Completo)
+
+Nova funcionalidade de validação visual por IA multimodal que analisa imagens de satélite para confirmar ou questionar as projeções algorítmicas de fenologia.
+
+**Arquitetura de Agentes (Fase 1 + 2)**:
+- Agente Curador: seleciona e pontua as melhores imagens de satélite
+- Agente Juiz: valida projeções algorítmicas usando visão computacional
+- Serviço orquestrador (`ai-validation.service.ts`) coordena o pipeline completo
+- Busca automática de imagens via Sentinel Hub Process API
+- Suporte multi-sensor: Sentinel-2, Sentinel-1 (radar), Landsat, Sentinel-3
+- Adaptado para SDK `@google/genai` (Gemini 3 Flash Preview + 2.5 Flash Lite)
+
+**Integração no Processamento (Fase 3)**:
+- Bloco de validação visual no `process/route.ts` com feature flag guard
+- Três modos de trigger: MANUAL, ON_PROCESS (automático), ON_LOW_CONFIDENCE (<50%)
+- Resultados persistidos no AgroData (concordância, alertas visuais, custo)
+- Graceful degradation: falhas na IA não impactam o processamento existente
+
+**Enriquecimento de Templates (Fase 4)**:
+- `AnalysisContext` expandido com dados de validação visual
+- Templates Logística, Crédito e Matriz de Risco recebem dados de concordância IA
+- Template de análise registra se validação visual foi usada (`aiValidationUsed`)
+
+**Interface de Configuração (Fase 5)**:
+- **Settings > Módulos**: Toggle para habilitar/desabilitar validação visual IA
+  - Selector de trigger (Manual / Automático / Baixa confiança)
+  - Selector de modelo do Curador (Flash Lite vs Flash Preview)
+- **Settings > Visualizações**: Toggle para mostrar/esconder painel no relatório
+- **Relatório**: Novo painel "Validação Visual IA" com:
+  - Badge de concordância (Confirmado / Questionado / Rejeitado)
+  - Métricas: confiança IA, estágio fenológico, EOS ajustado, colheita
+  - Fatores de risco visuais e alertas detalhados
+  - Recomendações do agente Juiz
+
+**Schema (Prisma)**:
+- `WorkspaceSettings`: `enableAIValidation`, `aiValidationTrigger`, `aiCuratorModel`, `showAIValidation`
+- `AgroData`: 8 campos opcionais para resultados da validação
+- `Analysis`: `aiValidationUsed`, `aiValidationAgreement`
+
+---
+
 ## [0.0.28] - 2026-02-06
 
 ### Gestão Avançada de Talhões

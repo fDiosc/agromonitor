@@ -94,7 +94,16 @@ export async function GET(request: NextRequest) {
             areaHa: true,
             volumeEstimatedKg: true,
             confidence: true,
-            eosDate: true
+            confidenceScore: true,
+            eosDate: true,
+            sosDate: true,
+            rawAreaData: true,       // processed server-side → fusedEosDate
+            // AI Validation fields
+            aiValidationAgreement: true,
+            aiValidationConfidence: true,
+            aiEosAdjustedDate: true,
+            aiValidationResult: true, // processed server-side → harvestReady
+            aiValidationDate: true,
           }
         },
         analyses: {
@@ -108,7 +117,55 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    return NextResponse.json({ fields })
+    // Process heavy fields server-side to avoid sending large JSON blobs to client
+    // NOTE on DB field names (historical naming):
+    //   aiValidationResult  → stores the agreement string ("CONFIRMED" | "QUESTIONED" | "REJECTED")
+    //   aiValidationAgreement → stores JSON with detailed agreement data (harvestReadiness, etc.)
+    const processedFields = fields.map(field => {
+      if (!field.agroData) return field
+
+      // Extract fusedEosDate from rawAreaData
+      let fusedEosDate: string | null = null
+      if (field.agroData.rawAreaData) {
+        try {
+          const raw = JSON.parse(field.agroData.rawAreaData)
+          fusedEosDate = raw.fusedEos?.date || null
+        } catch { /* ignore parse errors */ }
+      }
+
+      // Agreement string comes from aiValidationResult (not aiValidationAgreement!)
+      const agreementStr = field.agroData.aiValidationResult ?? null // "CONFIRMED" | "QUESTIONED" | "REJECTED"
+
+      // Extract harvestReady from aiValidationAgreement JSON (the detailed data field)
+      let harvestReady: boolean | null = null
+      if (field.agroData.aiValidationAgreement) {
+        try {
+          const details = JSON.parse(field.agroData.aiValidationAgreement)
+          harvestReady = details.harvestReadiness?.ready ?? null
+        } catch { /* ignore parse errors */ }
+      }
+
+      return {
+        ...field,
+        agroData: {
+          areaHa: field.agroData.areaHa,
+          volumeEstimatedKg: field.agroData.volumeEstimatedKg,
+          confidence: field.agroData.confidence,
+          confidenceScore: field.agroData.confidenceScore,
+          eosDate: field.agroData.eosDate,
+          sosDate: field.agroData.sosDate,
+          fusedEosDate,
+          // AI fields (lightweight, pre-processed)
+          aiValidationAgreement: agreementStr, // Now correctly the agreement string
+          aiValidationConfidence: field.agroData.aiValidationConfidence,
+          aiEosAdjustedDate: field.agroData.aiEosAdjustedDate,
+          aiValidationDate: field.agroData.aiValidationDate,
+          harvestReady,
+        }
+      }
+    })
+
+    return NextResponse.json({ fields: processedFields })
   } catch (error) {
     console.error('Error listing fields:', error)
     return NextResponse.json(

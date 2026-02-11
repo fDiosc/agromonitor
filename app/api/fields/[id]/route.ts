@@ -110,14 +110,27 @@ export async function GET(
       }
     }
 
-    // Calcular janela de colheita
+    // Extrair EOS fusionado (NDVI + GDD + balanço hídrico) se disponível
+    let bestEosDate: string | null = field.agroData?.eosDate?.toISOString().split('T')[0] || null
+    let fusedEosInfo: { date: string, method: string, confidence: number, passed?: boolean } | null = null
+    if (field.agroData?.rawAreaData) {
+      try {
+        const areaData = JSON.parse(field.agroData.rawAreaData)
+        if (areaData.fusedEos?.date) {
+          bestEosDate = areaData.fusedEos.date
+          fusedEosInfo = areaData.fusedEos
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Calcular janela de colheita usando EOS fusionado
     let harvestEndDate: string | null = null
-    if (field.agroData?.eosDate) {
-      const areaHa = field.agroData.areaHa || 100
+    if (bestEosDate) {
+      const areaHa = field.agroData?.areaHa || 100
       const harvestCapacityHaPerDay = 50 // Capacidade média: 50 ha/dia
       const harvestDays = Math.ceil(areaHa / harvestCapacityHaPerDay)
       
-      const harvestEnd = new Date(field.agroData.eosDate)
+      const harvestEnd = new Date(bestEosDate)
       harvestEnd.setDate(harvestEnd.getDate() + harvestDays)
       harvestEndDate = harvestEnd.toISOString().split('T')[0]
     }
@@ -130,7 +143,7 @@ export async function GET(
         historicalNdviPoints,
         field.agroData?.sosDate?.toISOString().split('T')[0] || null,
         field.cropType || 'SOJA',
-        field.agroData?.eosDate?.toISOString().split('T')[0] || null,
+        bestEosDate,
         field.agroData?.plantingDate?.toISOString().split('T')[0] || null,
         harvestEndDate
       )
@@ -138,13 +151,13 @@ export async function GET(
 
     // Calcular informações da janela de colheita para retornar
     let harvestWindowInfo = null
-    if (field.agroData?.eosDate) {
-      const areaHa = field.agroData.areaHa || 100
+    if (bestEosDate) {
+      const areaHa = field.agroData?.areaHa || 100
       const harvestCapacityHaPerDay = 50
       const harvestDays = Math.ceil(areaHa / harvestCapacityHaPerDay)
       
-      const harvestStart = new Date(field.agroData.eosDate)
-      const harvestEnd = new Date(field.agroData.eosDate)
+      const harvestStart = new Date(bestEosDate)
+      const harvestEnd = new Date(bestEosDate)
       harvestEnd.setDate(harvestEnd.getDate() + harvestDays)
       
       harvestWindowInfo = {
@@ -175,7 +188,8 @@ export async function GET(
       correlationDetails,
       chartOverlayData,
       harvestWindow: harvestWindowInfo,
-      zarcInfo
+      zarcInfo,
+      fusedEos: fusedEosInfo
     })
   } catch (error) {
     console.error('Error fetching field:', error)

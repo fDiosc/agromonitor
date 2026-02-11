@@ -138,7 +138,16 @@ function buildUserPrompt(context: AnalysisContext): string {
 ### CONTEXTO REGIONAL
 - Período típico de chuvas: Outubro a Março
 - Mês da colheita: ${agroData.eosDate ? new Date(agroData.eosDate).toLocaleString('pt-BR', { month: 'long' }) : 'indefinido'}
-
+${context.aiValidation ? `
+### VALIDAÇÃO VISUAL IA (Imagens de Satélite)
+- Concordância com projeções: ${context.aiValidation.agreement} (Confiança: ${context.aiValidation.confidence}%)
+- Concordância de estágio fenológico: ${context.aiValidation.stageAgreement ? 'SIM' : 'NÃO'}
+- EOS ajustado visualmente: ${context.aiValidation.eosAdjustedDate || 'Sem ajuste'}
+${context.aiValidation.eosAdjustmentReason ? `- Motivo ajuste: ${context.aiValidation.eosAdjustmentReason}` : ''}
+- Colheita pronta: ${context.aiValidation.harvestReadiness.ready ? 'SIM' : 'NÃO'} - ${context.aiValidation.harvestReadiness.notes}
+- Risco visual geral: ${context.aiValidation.riskAssessment.overallRisk}
+${context.aiValidation.visualAlerts.length > 0 ? `- Alertas visuais: ${context.aiValidation.visualAlerts.map(a => `[${a.severity}] ${a.description}`).join('; ')}` : ''}
+` : ''}
 Analise os riscos e gere recomendações em JSON:
 {
   "weatherRisk": "BAIXO" | "MEDIO" | "ALTO",

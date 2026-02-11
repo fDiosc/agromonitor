@@ -2,48 +2,14 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { FieldTable } from '@/components/fields/field-table'
-import { Loader2, Plus, Filter, X, Warehouse, CheckCircle, Clock, AlertCircle, AlertTriangle } from 'lucide-react'
+import type { Field } from '@/components/fields/field-table'
+import { Loader2, Plus, Filter, X, Warehouse, CheckCircle, Clock, AlertCircle, BrainCircuit, Target, CalendarCheck } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 
 interface LogisticsUnit {
   id: string
   name: string
-}
-
-interface Field {
-  id: string
-  name: string
-  status: string
-  errorMessage?: string | null
-  city: string | null
-  state: string | null
-  areaHa: number | null
-  agroData?: {
-    areaHa: number | null
-    volumeEstimatedKg: number | null
-    confidence: string | null
-    eosDate: string | null
-  } | null
-  analyses?: {
-    templateId: string
-    status: string
-    statusColor: string | null
-  }[]
-  // Caixas logísticas
-  logisticsUnit?: { id: string; name: string } | null
-  producer?: { 
-    id: string
-    name: string
-    defaultLogisticsUnit?: { id: string; name: string } | null 
-  } | null
-  logisticsDistances?: {
-    logisticsUnitId: string
-    distanceKm: number
-    isWithinCoverage: boolean
-    logisticsUnit: { id: string; name: string }
-  }[]
 }
 
 export default function DashboardPage() {
@@ -58,6 +24,10 @@ export default function DashboardPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [logisticsUnitFilter, setLogisticsUnitFilter] = useState<string>('all')
   const [assignmentTypeFilter, setAssignmentTypeFilter] = useState<string>('all')
+  const [aiFilter, setAiFilter] = useState<string>('all')
+  const [aiAgreementFilter, setAiAgreementFilter] = useState<string>('all')
+  const [confidenceFilter, setConfidenceFilter] = useState<string>('all')
+  const [harvestWindowFilter, setHarvestWindowFilter] = useState<string>('all')
 
   const fetchFields = useCallback(async () => {
     try {
@@ -114,48 +84,70 @@ export default function DashboardPage() {
 
   // Filtrar campos
   const filteredFields = useMemo(() => {
+    const now = Date.now()
+    const DAY = 86400000
+
     return fields.filter(field => {
       // Filtro de status
-      if (statusFilter !== 'all' && field.status !== statusFilter) {
-        return false
-      }
+      if (statusFilter !== 'all' && field.status !== statusFilter) return false
 
+      // ── Logistics filters ──
       const directUnit = field.logisticsUnit?.id
       const inheritedUnit = field.producer?.defaultLogisticsUnit?.id
       const coveringUnits = field.logisticsDistances?.map(d => d.logisticsUnit.id) || []
 
-      // Filtro de tipo de atribuição
       if (assignmentTypeFilter !== 'all') {
-        if (assignmentTypeFilter === 'manual' && !directUnit) {
-          return false
-        }
-        if (assignmentTypeFilter === 'producer' && (directUnit || !inheritedUnit)) {
-          return false
-        }
-        if (assignmentTypeFilter === 'auto' && (directUnit || inheritedUnit || coveringUnits.length === 0)) {
-          return false
-        }
-        if (assignmentTypeFilter === 'none' && (directUnit || inheritedUnit || coveringUnits.length > 0)) {
-          return false
+        if (assignmentTypeFilter === 'manual' && !directUnit) return false
+        if (assignmentTypeFilter === 'producer' && (directUnit || !inheritedUnit)) return false
+        if (assignmentTypeFilter === 'auto' && (directUnit || inheritedUnit || coveringUnits.length === 0)) return false
+        if (assignmentTypeFilter === 'none' && (directUnit || inheritedUnit || coveringUnits.length > 0)) return false
+      }
+
+      if (logisticsUnitFilter !== 'all') {
+        if (logisticsUnitFilter === 'none') {
+          if (directUnit || inheritedUnit || coveringUnits.length > 0) return false
+        } else {
+          if (directUnit !== logisticsUnitFilter && inheritedUnit !== logisticsUnitFilter && !coveringUnits.includes(logisticsUnitFilter)) return false
         }
       }
 
-      // Filtro de caixa logística
-      if (logisticsUnitFilter !== 'all') {
-        if (logisticsUnitFilter === 'none') {
-          // Sem atribuição
-          return !directUnit && !inheritedUnit && coveringUnits.length === 0
+      // ── AI filters ──
+      const hasAi = !!field.agroData?.aiValidationAgreement
+      if (aiFilter === 'with_ai' && !hasAi) return false
+      if (aiFilter === 'without_ai' && hasAi) return false
+
+      if (aiAgreementFilter !== 'all') {
+        if (field.agroData?.aiValidationAgreement !== aiAgreementFilter) return false
+      }
+
+      // ── Confidence filter ──
+      if (confidenceFilter !== 'all') {
+        const cs = field.agroData?.confidenceScore
+        if (confidenceFilter === 'high' && (cs == null || cs < 75)) return false
+        if (confidenceFilter === 'medium' && (cs == null || cs < 40 || cs >= 75)) return false
+        if (confidenceFilter === 'low' && (cs == null || cs >= 40)) return false
+        if (confidenceFilter === 'none' && cs != null) return false
+      }
+
+      // ── Harvest window filter ──
+      if (harvestWindowFilter !== 'all') {
+        const eosStr = field.agroData?.fusedEosDate || field.agroData?.eosDate
+        if (!eosStr) {
+          if (harvestWindowFilter !== 'no_data') return false
         } else {
-          // Atribuído a uma caixa específica
-          return directUnit === logisticsUnitFilter || 
-                 inheritedUnit === logisticsUnitFilter ||
-                 coveringUnits.includes(logisticsUnitFilter)
+          const eosMs = new Date(eosStr).getTime()
+          const diff = eosMs - now
+          if (harvestWindowFilter === 'past' && diff >= 0) return false
+          if (harvestWindowFilter === 'next30' && (diff < 0 || diff > 30 * DAY)) return false
+          if (harvestWindowFilter === 'next60' && (diff < 0 || diff > 60 * DAY)) return false
+          if (harvestWindowFilter === 'next90' && (diff < 0 || diff > 90 * DAY)) return false
+          if (harvestWindowFilter === 'no_data') return false
         }
       }
 
       return true
     })
-  }, [fields, statusFilter, logisticsUnitFilter, assignmentTypeFilter])
+  }, [fields, statusFilter, logisticsUnitFilter, assignmentTypeFilter, aiFilter, aiAgreementFilter, confidenceFilter, harvestWindowFilter])
 
   const handleDelete = async (id: string) => {
     if (!confirm('Tem certeza que deseja excluir este talhão?')) return
@@ -197,9 +189,14 @@ export default function DashboardPage() {
     setStatusFilter('all')
     setLogisticsUnitFilter('all')
     setAssignmentTypeFilter('all')
+    setAiFilter('all')
+    setAiAgreementFilter('all')
+    setConfidenceFilter('all')
+    setHarvestWindowFilter('all')
   }
 
   const hasActiveFilters = statusFilter !== 'all' || logisticsUnitFilter !== 'all' || assignmentTypeFilter !== 'all'
+    || aiFilter !== 'all' || aiAgreementFilter !== 'all' || confidenceFilter !== 'all' || harvestWindowFilter !== 'all'
 
   return (
     <div className="p-8">
@@ -216,100 +213,179 @@ export default function DashboardPage() {
       </div>
 
       {/* Filtros */}
-      <div className="mb-6 flex flex-wrap items-center gap-4 bg-slate-50 p-4 rounded-lg border">
-        <div className="flex items-center gap-2 text-sm text-slate-600">
-          <Filter size={16} />
-          <span className="font-medium">Filtros:</span>
-        </div>
-
-        {/* Filtro de Status */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500">Status:</span>
-          <div className="flex gap-1">
-            {[
-              { value: 'all', label: 'Todos', icon: null },
-              { value: 'SUCCESS', label: 'Processado', icon: <CheckCircle size={12} className="text-green-500" /> },
-              { value: 'PROCESSING', label: 'Processando', icon: <Loader2 size={12} className="animate-spin text-blue-500" /> },
-              { value: 'PENDING', label: 'Pendente', icon: <Clock size={12} className="text-slate-400" /> },
-              { value: 'ERROR', label: 'Erro', icon: <AlertCircle size={12} className="text-red-500" /> },
-            ].map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => setStatusFilter(opt.value)}
-                className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
-                  statusFilter === opt.value
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-white border text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {opt.icon}
-                {opt.label}
-              </button>
-            ))}
+      <div className="mb-6 bg-slate-50 rounded-xl border divide-y divide-slate-200">
+        {/* Row 1: Status + Logística */}
+        <div className="flex flex-wrap items-center gap-4 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <Filter size={16} />
+            <span className="font-semibold">Filtros</span>
           </div>
-        </div>
 
-        {/* Filtro de Caixa Logística */}
-        {logisticsUnits.length > 0 && (
+          {/* Status */}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">
-              <Warehouse size={12} className="inline mr-1" />
-              Caixa:
-            </span>
-            <select
-              value={logisticsUnitFilter}
-              onChange={(e) => setLogisticsUnitFilter(e.target.value)}
-              className="px-2 py-1 rounded border text-xs bg-white"
-            >
-              <option value="all">Todas</option>
-              <option value="none">Sem atribuição</option>
-              {logisticsUnits.map(unit => (
-                <option key={unit.id} value={unit.id}>{unit.name}</option>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Status:</span>
+            <div className="flex gap-1">
+              {[
+                { value: 'all', label: 'Todos', icon: null },
+                { value: 'SUCCESS', label: 'Processado', icon: <CheckCircle size={11} className="text-green-500" /> },
+                { value: 'PROCESSING', label: 'Em proc.', icon: <Loader2 size={11} className="animate-spin text-blue-500" /> },
+                { value: 'PENDING', label: 'Pendente', icon: <Clock size={11} className="text-slate-400" /> },
+                { value: 'ERROR', label: 'Erro', icon: <AlertCircle size={11} className="text-red-500" /> },
+              ].map(opt => (
+                <button key={opt.value} onClick={() => setStatusFilter(opt.value)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                    statusFilter === opt.value ? 'bg-blue-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {opt.icon}{opt.label}
+                </button>
               ))}
-            </select>
+            </div>
           </div>
-        )}
 
-        {/* Filtro de Tipo de Atribuição */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500">Tipo:</span>
-          <div className="flex gap-1">
-            {[
-              { value: 'all', label: 'Todos', color: 'bg-white border text-slate-600' },
-              { value: 'manual', label: 'Manual', color: 'bg-blue-100 text-blue-700' },
-              { value: 'producer', label: 'Produtor', color: 'bg-purple-100 text-purple-700' },
-              { value: 'auto', label: 'Auto', color: 'bg-green-100 text-green-700' },
-              { value: 'none', label: 'Sem', color: 'bg-red-100 text-red-700' },
-            ].map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => setAssignmentTypeFilter(opt.value)}
-                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
-                  assignmentTypeFilter === opt.value
-                    ? 'ring-2 ring-offset-1 ring-slate-400 ' + opt.color
-                    : opt.color + ' hover:opacity-80'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+          {/* Tipo atribuição */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Tipo:</span>
+            <div className="flex gap-1">
+              {[
+                { value: 'all', label: 'Todos', color: 'bg-white border text-slate-600' },
+                { value: 'manual', label: 'Manual', color: 'bg-blue-100 text-blue-700' },
+                { value: 'producer', label: 'Produtor', color: 'bg-purple-100 text-purple-700' },
+                { value: 'auto', label: 'Auto', color: 'bg-green-100 text-green-700' },
+                { value: 'none', label: 'Sem', color: 'bg-red-100 text-red-700' },
+              ].map(opt => (
+                <button key={opt.value} onClick={() => setAssignmentTypeFilter(opt.value)}
+                  className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                    assignmentTypeFilter === opt.value ? 'ring-2 ring-offset-1 ring-slate-400 ' + opt.color : opt.color + ' hover:opacity-80'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
+
+          {/* Caixa logística */}
+          {logisticsUnits.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <Warehouse size={10} className="inline mr-0.5" />Caixa:
+              </span>
+              <select value={logisticsUnitFilter} onChange={e => setLogisticsUnitFilter(e.target.value)}
+                className="px-2 py-1 rounded border text-[11px] bg-white">
+                <option value="all">Todas</option>
+                <option value="none">Sem atribuição</option>
+                {logisticsUnits.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
+          )}
         </div>
 
-        {/* Limpar filtros */}
-        {hasActiveFilters && (
-          <button
-            onClick={clearFilters}
-            className="flex items-center gap-1 px-2 py-1 text-xs text-slate-500 hover:text-slate-700"
-          >
-            <X size={12} />
-            Limpar filtros
-          </button>
-        )}
+        {/* Row 2: Fenologia + IA */}
+        <div className="flex flex-wrap items-center gap-4 px-4 py-3">
+          {/* Janela de colheita */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <CalendarCheck size={10} className="inline mr-0.5" />Colheita:
+            </span>
+            <div className="flex gap-1">
+              {[
+                { value: 'all', label: 'Todas' },
+                { value: 'past', label: 'Passada' },
+                { value: 'next30', label: '30 dias' },
+                { value: 'next60', label: '60 dias' },
+                { value: 'next90', label: '90 dias' },
+                { value: 'no_data', label: 'Sem data' },
+              ].map(opt => (
+                <button key={opt.value} onClick={() => setHarvestWindowFilter(opt.value)}
+                  className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                    harvestWindowFilter === opt.value ? 'bg-blue-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
-        {/* Contador */}
-        <div className="ml-auto text-xs text-slate-500">
-          {filteredFields.length} de {fields.length} talhões
+          {/* Confiança modelo */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <Target size={10} className="inline mr-0.5" />Conf.:
+            </span>
+            <div className="flex gap-1">
+              {[
+                { value: 'all', label: 'Todas' },
+                { value: 'high', label: 'Alta (>75%)' },
+                { value: 'medium', label: 'Média' },
+                { value: 'low', label: 'Baixa (<40%)' },
+                { value: 'none', label: 'Sem' },
+              ].map(opt => (
+                <button key={opt.value} onClick={() => setConfidenceFilter(opt.value)}
+                  className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                    confidenceFilter === opt.value ? 'bg-blue-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Validação IA */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <BrainCircuit size={10} className="inline mr-0.5" />IA:
+            </span>
+            <div className="flex gap-1">
+              {[
+                { value: 'all', label: 'Todos' },
+                { value: 'with_ai', label: 'Com IA' },
+                { value: 'without_ai', label: 'Sem IA' },
+              ].map(opt => (
+                <button key={opt.value} onClick={() => setAiFilter(opt.value)}
+                  className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                    aiFilter === opt.value ? 'bg-violet-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* IA Agreement */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Resultado IA:</span>
+            <div className="flex gap-1">
+              {[
+                { value: 'all', label: 'Todos', cls: 'bg-white border text-slate-600' },
+                { value: 'CONFIRMED', label: 'Confirmado', cls: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
+                { value: 'QUESTIONED', label: 'Questionado', cls: 'bg-amber-50 border-amber-200 text-amber-700' },
+                { value: 'REJECTED', label: 'Rejeitado', cls: 'bg-red-50 border-red-200 text-red-700' },
+              ].map(opt => (
+                <button key={opt.value} onClick={() => setAiAgreementFilter(opt.value)}
+                  className={`px-2 py-1 rounded text-[11px] font-medium border transition-colors ${
+                    aiAgreementFilter === opt.value ? 'ring-2 ring-offset-1 ring-slate-400 ' + opt.cls : opt.cls + ' hover:opacity-80'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Limpar + Contador */}
+          <div className="ml-auto flex items-center gap-3">
+            {hasActiveFilters && (
+              <button onClick={clearFilters} className="flex items-center gap-1 px-2 py-1 text-[11px] text-slate-500 hover:text-slate-700 font-medium">
+                <X size={12} />Limpar
+              </button>
+            )}
+            <span className="text-[11px] text-slate-500 font-medium">
+              {filteredFields.length} de {fields.length} talhões
+            </span>
+          </div>
         </div>
       </div>
 

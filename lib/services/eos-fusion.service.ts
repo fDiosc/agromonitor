@@ -57,6 +57,9 @@ export interface EosFusionResult {
   confidence: number             // 0-100
   method: 'NDVI' | 'GDD' | 'FUSION' | 'NDVI_ADJUSTED' | 'GDD_ADJUSTED'
   
+  // Indica se o EOS já passou (colheita deveria ter ocorrido)
+  passed: boolean
+  
   // Estágio fenológico atual
   phenologicalStage: 'VEGETATIVE' | 'REPRODUCTIVE' | 'GRAIN_FILLING' | 'SENESCENCE' | 'MATURITY'
   
@@ -215,14 +218,34 @@ export function calculateFusedEos(input: EosFusionInput): EosFusionResult {
   
   // Caso 1: GDD ultrapassou 100% E NDVI em declínio rápido = Maturação confirmada
   if (gddProgress >= 1.0 && input.currentNdvi < NDVI_THRESHOLDS.SENESCENCE_START && input.ndviDeclineRate > NDVI_THRESHOLDS.DECLINE_RATE_FAST) {
-    // Maturação fisiológica atingida, usar EOS NDVI ou hoje
-    eos = input.eosNdvi && input.eosNdvi > today ? input.eosNdvi : today
+    // Maturação fisiológica atingida - usar a melhor data disponível (NDVI ou GDD)
+    // NÃO usar "today" como fallback - o EOS é uma data fixa de quando a cultura maturou
+    if (input.eosNdvi && input.eosGdd) {
+      // Ambas disponíveis: média ponderada (mesmo que no passado)
+      const ndviWeight = input.ndviConfidence / 100
+      const gddWeight = (GDD_CONFIDENCE_MAP[input.gddConfidence] || 70) / 100
+      const totalWeight = ndviWeight + gddWeight
+      const avgTime = (input.eosNdvi.getTime() * ndviWeight + input.eosGdd.getTime() * gddWeight) / totalWeight
+      eos = new Date(avgTime + waterAdjustment * 24 * 60 * 60 * 1000)
+    } else if (input.eosNdvi) {
+      // Apenas NDVI disponível (mesmo que no passado)
+      eos = new Date(input.eosNdvi.getTime() + waterAdjustment * 24 * 60 * 60 * 1000)
+    } else if (input.eosGdd) {
+      // Apenas GDD disponível
+      eos = new Date(input.eosGdd.getTime() + waterAdjustment * 24 * 60 * 60 * 1000)
+    } else {
+      // Nenhuma data disponível (raro com GDD >= 100%)
+      eos = today
+    }
     confidence = Math.max(input.ndviConfidence, GDD_CONFIDENCE_MAP[input.gddConfidence] || 70)
     method = 'FUSION'
     explanation = 'Maturação fisiológica atingida (GDD 100%), senescência ativa confirmada por NDVI'
     factors.push('GDD: 100% - maturação fisiológica')
     factors.push(`NDVI: ${(input.currentNdvi * 100).toFixed(0)}% - em declínio`)
     factors.push(`Taxa declínio: ${input.ndviDeclineRate.toFixed(2)}%/pt`)
+    if (eos < today) {
+      warnings.push(`Maturação já ocorreu em ${formatDate(eos)} - colheita deve ser imediata`)
+    }
   }
   // Caso 2: EOS NDVI já passou MAS planta ainda verde = Usar GDD
   else if (input.eosNdvi && input.eosNdvi < today && input.currentNdvi > NDVI_THRESHOLDS.VEGETATIVE_MIN) {
@@ -308,6 +331,7 @@ export function calculateFusedEos(input: EosFusionInput): EosFusionResult {
     eos,
     confidence: adjustedConfidence,
     method,
+    passed: eos < today,
     phenologicalStage,
     explanation,
     factors,

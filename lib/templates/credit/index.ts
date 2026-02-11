@@ -73,7 +73,16 @@ function buildUserPrompt(context: AnalysisContext): string {
 
 ### DIAGNÓSTICOS
 ${phenology.diagnostics.map(d => `- [${d.type}] ${d.message}`).join('\n') || 'Nenhum diagnóstico'}
-
+${context.aiValidation ? `
+### VALIDAÇÃO VISUAL IA (Imagens de Satélite)
+- Concordância com projeções algorítmicas: ${context.aiValidation.agreement} (Confiança: ${context.aiValidation.confidence}%)
+- Concordância de estágio: ${context.aiValidation.stageAgreement ? 'SIM' : 'NÃO'}
+- EOS ajustado visualmente: ${context.aiValidation.eosAdjustedDate || 'Sem ajuste'}
+${context.aiValidation.eosAdjustmentReason ? `- Motivo: ${context.aiValidation.eosAdjustmentReason}` : ''}
+- Risco visual geral: ${context.aiValidation.riskAssessment.overallRisk}
+${context.aiValidation.riskAssessment.factors.length > 0 ? `- Fatores de risco: ${context.aiValidation.riskAssessment.factors.map(f => `${f.factor}(${f.level})`).join(', ')}` : ''}
+${context.aiValidation.visualAlerts.filter(a => a.severity === 'HIGH').length > 0 ? `- Alertas críticos: ${context.aiValidation.visualAlerts.filter(a => a.severity === 'HIGH').map(a => a.description).join('; ')}` : ''}
+` : ''}
 Gere análise de risco de crédito em JSON com:
 {
   "status": "NORMAL" | "ALERTA" | "CRITICO",

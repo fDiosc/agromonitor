@@ -22,7 +22,9 @@ import {
   Calculator,
   Clock,
   Sparkles,
-  Layers
+  Layers,
+  Eye,
+  BrainCircuit
 } from 'lucide-react'
 
 interface WorkspaceSettings {
@@ -55,6 +57,12 @@ interface FeatureFlags {
   useGddForEos: boolean
   useWaterBalanceAdjust: boolean
   usePrecipitationAdjust: boolean
+
+  // Validação Visual IA
+  enableAIValidation: boolean
+  aiValidationTrigger: 'MANUAL' | 'ON_PROCESS' | 'ON_LOW_CONFIDENCE'
+  aiCuratorModel: string
+  showAIValidation: boolean  // Show AI validation section in reports
 
   // Auto-reprocessamento
   enableAutoReprocess: boolean
@@ -91,6 +99,10 @@ const DEFAULT_FLAGS: FeatureFlags = {
   useGddForEos: false,
   useWaterBalanceAdjust: false,
   usePrecipitationAdjust: true,
+  enableAIValidation: false,
+  aiValidationTrigger: 'MANUAL',
+  aiCuratorModel: 'gemini-2.5-flash-lite',
+  showAIValidation: true,
   enableAutoReprocess: false,
   autoReprocessFrequency: 'ON_NEW_DATA',
   autoReprocessNotify: true,
@@ -553,6 +565,50 @@ export default function SettingsPage() {
               onChange={(v) => updateFlag('enableClimateEnvelope', v)}
               icon={BarChart3}
             />
+            
+            <FeatureToggle
+              label="Validação Visual IA"
+              description="Usa agentes de IA multimodais (Gemini) para validar projeções algorítmicas com imagens de satélite"
+              checked={flags.enableAIValidation}
+              onChange={(v) => updateFlag('enableAIValidation', v)}
+              icon={BrainCircuit}
+              badge="NOVO"
+            />
+            
+            {flags.enableAIValidation && (
+              <div className="ml-7 space-y-4 p-4 bg-violet-50 rounded-lg border border-violet-200">
+                <p className="text-xs text-violet-700">
+                  <strong>Pipeline IA:</strong> Dois agentes (Curador + Juiz) analisam imagens de satélite 
+                  para validar datas de colheita, estágio fenológico e identificar anomalias visuais. 
+                  Requer credenciais Copernicus configuradas.
+                </p>
+                
+                <div>
+                  <label className="text-sm font-medium text-slate-700">Quando executar</label>
+                  <select
+                    value={flags.aiValidationTrigger}
+                    onChange={(e) => updateFlag('aiValidationTrigger', e.target.value as 'MANUAL' | 'ON_PROCESS' | 'ON_LOW_CONFIDENCE')}
+                    className="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md text-sm"
+                  >
+                    <option value="MANUAL">Manual (sob demanda)</option>
+                    <option value="ON_PROCESS">Automático ao processar talhão</option>
+                    <option value="ON_LOW_CONFIDENCE">Automático quando confiança &lt; 50%</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="text-sm font-medium text-slate-700">Modelo do Curador</label>
+                  <select
+                    value={flags.aiCuratorModel}
+                    onChange={(e) => updateFlag('aiCuratorModel', e.target.value)}
+                    className="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-md text-sm"
+                  >
+                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (mais rápido, menor custo)</option>
+                    <option value="gemini-3-flash-preview">Gemini 3 Flash Preview (maior precisão)</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -625,6 +681,14 @@ export default function SettingsPage() {
               checked={flags.showSatelliteSchedule}
               onChange={(v) => updateFlag('showSatelliteSchedule', v)}
               icon={Sparkles}
+            />
+            
+            <FeatureToggle
+              label="Validação Visual IA"
+              description="Mostra seção de validação visual IA no relatório (concordância, alertas visuais, colheita)"
+              checked={flags.showAIValidation}
+              onChange={(v) => updateFlag('showAIValidation', v)}
+              icon={BrainCircuit}
             />
           </CardContent>
         </Card>
