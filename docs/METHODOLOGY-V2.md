@@ -1,8 +1,8 @@
 # Metodologia V2 - Detecção de Colheita Avançada
 
-**Versão:** 3.1  
+**Versão:** 4.1  
 **Data:** Fevereiro 2026  
-**Status:** Implementado (Fase 9 pendente, IA Visual v0.0.29, EOS Fix v0.0.30, Dashboard v0.0.31)
+**Status:** Implementado (Fase 9 pendente, IA Visual v0.0.29, EOS Fix v0.0.30, Dashboard v0.0.31, Crop Criticality v0.0.32, EOS Sanity + ATYPICAL Refinement v0.0.33)
 
 ---
 
@@ -16,8 +16,9 @@
 6. [Graceful Degradation](#6-graceful-degradation)
 7. [Validação Visual por IA](#7-validação-visual-por-ia-v0029)
 8. [Correção do Pipeline EOS](#8-correção-do-pipeline-eos-v0030)
-9. [Status de Implementação](#9-status-de-implementação)
-10. [Referências Bibliográficas](#10-referências-bibliográficas)
+9. [Pipeline de Criticidade de Cultura](#9-pipeline-de-criticidade-de-cultura-v0032)
+10. [Status de Implementação](#10-status-de-implementação)
+11. [Referências Bibliográficas](#11-referências-bibliográficas)
 
 ---
 
@@ -30,6 +31,7 @@ A Metodologia V2 representa uma evolução significativa no sistema de detecçã
 - **Maior precisão na detecção de EOS** através da fusão de múltiplas fontes de dados
 - **Single Source of Truth (v0.0.30)**: Data canônica calculada no servidor, eliminando divergências
 - **Validação Visual por IA (v0.0.29)**: Agentes multimodais confirmam ou questionam projeções
+- **Criticidade de Cultura (v0.0.32)**: Verificação algorítmica + IA se a cultura declarada existe
 - **Robustez contra falhas** com graceful degradation em cada camada
 - **Transparência** com badges de status indicando a qualidade dos dados
 - **Configurabilidade** por workspace via feature flags
@@ -68,11 +70,22 @@ A Metodologia V2 representa uma evolução significativa no sistema de detecçã
 │                              │                                     │
 │                              v                                     │
 │  ┌──────────────────────────────────────────────────────────────┐  │
-│  │              VALIDAÇÃO VISUAL IA (v0.0.29)                    │  │
+│  │           CRITICIDADE DE CULTURA (v0.0.32)                    │  │
+│  │  • crop-pattern.service: validação algorítmica (custo zero)  │  │
+│  │  • 8 culturas: soja, milho, gergelim, cevada, algodão,      │  │
+│  │    arroz, cana (semi-perene), café (perene)                  │  │
+│  │  • NO_CROP → short-circuit total (sem EOS, GDD, IA)         │  │
+│  │  • ANOMALOUS → Verificador IA confirma visualmente          │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                              │                                     │
+│                              v                                     │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │       VALIDAÇÃO VISUAL IA (v0.0.29 + Verifier v0.0.32)       │  │
 │  │  • Busca de imagens Sentinel Hub (True Color, NDVI, Radar)   │  │
 │  │  • Curador: seleciona melhores imagens                        │  │
+│  │  • Verificador: confirma presença da cultura (se necessário) │  │
 │  │  • Juiz: valida projeções com visão multimodal                │  │
-│  │  • Concordância: CONFIRMED / QUESTIONED / REJECTED            │  │
+│  │  • Short-circuit: NO_CROP/MISMATCH → sem Judge               │  │
 │  │  • Feature flag: enableAIValidation                           │  │
 │  └──────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
@@ -96,6 +109,7 @@ lib/services/
 ├── ndvi-fusion.service.ts      # Fusão óptico + radar
 ├── eos-fusion.service.ts       # Fusão EOS (NDVI + GDD + Hídrico)
 ├── satellite-schedule.service.ts # Previsão de passagens
+├── crop-pattern.service.ts     # Análise algorítmica de padrão de cultura (v0.0.32)
 └── phenology.service.ts        # Cálculos fenológicos (existente)
 ```
 
@@ -117,7 +131,19 @@ lib/services/
    ├── Soma térmica (GDD)
    └── Análise de estresse hídrico
 
-3. AJUSTES DE EOS
+2b. CRITICIDADE DE CULTURA (v0.0.32) — executa após fenologia
+   ├── Análise algorítmica (crop-pattern.service)
+   │   ├── NO_CROP → SHORT-CIRCUIT (para processamento)
+   │   ├── ANOMALOUS → chama Verificador IA
+   │   ├── ATYPICAL → chama Verificador IA
+   │   └── TYPICAL → prossegue normalmente
+   └── Verificador IA (opcional)
+       ├── NO_CROP / MISMATCH → SHORT-CIRCUIT (sem Judge)
+       ├── CROP_FAILURE → flagged, mas prossegue
+       ├── SUSPICIOUS → prossegue com alerta
+       └── CONFIRMED → prossegue normalmente
+
+3. AJUSTES DE EOS (somente se cultura confirmada)
    ├── Por precipitação recente (+0 a +7 dias)
    ├── Por estresse hídrico (-12 a 0 dias)
    ├── Por soma térmica (projeção GDD)
@@ -128,6 +154,8 @@ lib/services/
    ├── Janela de colheita (start/end)
    ├── Estimativa de produtividade
    ├── Badges de status por fonte
+   ├── Status de criticidade de cultura (NO_CROP/ANOMALOUS/ATYPICAL/TYPICAL)
+   ├── Verificação IA de cultura (CONFIRMED/SUSPICIOUS/MISMATCH/NO_CROP/CROP_FAILURE)
    └── Próximas passagens de satélite
 ```
 
@@ -413,10 +441,26 @@ PROCESSO:
    IMPORTANTE (fix v0.0.30): O mapeamento PT→EN é feito no process/route.ts:
    CRITICO→CRITICAL, SEVERO→HIGH, MODERADO→MEDIUM, BAIXO→LOW, NENHUM→NONE
 
-5. FALLBACK:
+5. FALLBACK (GDD-only com sanity check — fix v0.0.33):
+   → Se apenas GDD disponível:
+     a) SE EOS_GDD no passado E NDVI_atual > 0.55:
+        → Contradição: GDD sugere maturidade mas planta ainda verde
+        → EOS = hoje + (dias restantes estimados por GDD residual)
+        → Confiança = conf_gdd * 0.5 (redução por contradição)
+        → Método = 'GDD_OVERRIDE_FUTURE'
+        → Explicação: "GDD EOS no passado contradiz NDVI ativo"
+     b) SENÃO: usar EOS_GDD normalmente
    → Se apenas NDVI disponível: usar EOS_NDVI
-   → Se apenas GDD disponível: usar EOS_GDD
    → Se nenhum: projeção com baixa confiança
+
+5b. DETERMINAÇÃO DO ESTÁGIO FENOLÓGICO (fix v0.0.33):
+   → NDVI PREVALECE sobre GDD quando há contradição:
+     - SE NDVI_atual > 0.7: estágio = VEGETATIVE (crescimento ativo)
+     - SE NDVI_atual > 0.55: estágio = REPRODUCTIVE (mesmo que GDD>90%)
+     - SE GDD >= 100% MAS NDVI > 0.65: NÃO declara MATURATION
+   → Lógica anterior confiava cegamente no GDD para determinar maturação
+   → Resultado: evita projeções de colheita passada com alta confiança
+     quando os dados NDVI ao vivo contradizem o modelo GDD
 
 SAÍDA:
   - eos: Date         (data canônica)
@@ -587,11 +631,11 @@ Cada fonte de dados exibe um badge indicando seu status:
 
 ### 7.1 Arquitetura de Agentes
 
-O sistema implementa um pipeline de dois agentes de IA multimodal para validar projeções algorítmicas usando imagens de satélite reais.
+O sistema implementa um pipeline de três agentes de IA multimodal (Curador + Verificador + Juiz) para validar projeções algorítmicas usando imagens de satélite reais. O Verificador (v0.0.32) é condicional — acionado apenas quando a análise algorítmica de padrão de cultura detecta anomalias.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                  PIPELINE DE VALIDAÇÃO VISUAL                    │
+│         PIPELINE DE VALIDAÇÃO VISUAL (Curador+Verifier+Judge)    │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  BUSCA DE IMAGENS (Sentinel Hub Process API)                     │
@@ -603,7 +647,16 @@ O sistema implementa um pipeline de dois agentes de IA multimodal para validar p
 │  CURADOR (gemini-2.5-flash-lite ou gemini-3-flash-preview)       │
 │  ├── Avalia qualidade: nuvens, cobertura, resolução              │
 │  ├── Pontua cada imagem (0-100)                                  │
-│  └── Seleciona top N imagens para o Juiz                         │
+│  └── Seleciona top N imagens para análise                        │
+│                                                                  │
+│  VERIFICADOR (gemini-2.5-flash-lite) — CONDICIONAL (v0.0.32)    │
+│  ├── Acionado se: cropPatternResult.shouldCallVerifier = true    │
+│  ├── Recebe: imagens curadas + NDVI time series + área           │
+│  ├── Foco exclusivo: confirmar identidade da cultura declarada   │
+│  ├── Decide: CONFIRMED / SUSPICIOUS / MISMATCH / NO_CROP /      │
+│  │           CROP_FAILURE                                         │
+│  ├── NO_CROP / MISMATCH → short-circuit (sem Judge)             │
+│  └── Outros → prossegue para o Juiz                              │
 │                                                                  │
 │  JUIZ (gemini-3-flash-preview - multimodal)                      │
 │  ├── Recebe: imagens curadas + dados agronômicos completos       │
@@ -678,6 +731,10 @@ Resultados são armazenados em `AgroData`:
 | `aiPhenologicalStage` | String? | Estágio fenológico visual |
 | `aiValidationCost` | Float? | Custo em USD |
 | `aiValidationDate` | DateTime? | Data/hora da execução |
+| `cropPatternStatus` | String? | NO_CROP / ANOMALOUS / ATYPICAL / TYPICAL (v0.0.32) |
+| `cropPatternData` | String? | JSON stringified CropPatternResult (v0.0.32) |
+| `aiCropVerificationStatus` | String? | CONFIRMED / SUSPICIOUS / MISMATCH / NO_CROP / CROP_FAILURE (v0.0.32) |
+| `aiCropVerificationData` | String? | JSON stringified CropVerification (v0.0.32) |
 
 ---
 
@@ -735,13 +792,341 @@ Análise extensiva do fluxo de dados revelou 8 bugs que causavam divergência na
 5. **fields/[id]/route.ts**: `bestEosDate` prioriza `rawAreaData.fusedEos.date`; retorna `fusedEos` no response
 6. **judge-prompt.ts**: Schema alinhado (`ready`, `overallRisk`, `factors[]`); critérios quantitativos de decisão
 7. **AIValidationPanel.tsx**: Normalização bidirecional old/new schema com mapeamento PT→EN
+8. **eos-fusion.service.ts (v0.0.33)**: `determinePhenologicalStage` prioriza NDVI sobre GDD — NDVI > 0.7 = VEGETATIVE, NDVI > 0.55 = REPRODUCTIVE, mesmo que GDD > 90%. Evita declarar MATURATION quando planta está visualmente verde.
+9. **eos-fusion.service.ts (v0.0.33)**: GDD-only fallback com sanity check — se EOS_GDD no passado mas NDVI > 0.55, projeta data futura com confiança reduzida em 50% (GDD_OVERRIDE_FUTURE)
 8. **ai-validation.service.ts**: Pós-processamento normaliza output do Juiz
 
 ---
 
-## 9. Status de Implementação
+## 9. Pipeline de Criticidade de Cultura (v0.0.32)
 
-### 9.1 Fases Completadas
+### 9.1 Motivação
+
+O pipeline de processamento anterior assumia que a cultura declarada no cadastro do talhão era fidedigna. Na prática, existem cenários críticos que invalidam essa premissa:
+
+- **Solo exposto**: Talhão declarado como "Soja" mas sem cultivo ativo (pousio, preparo)
+- **Cultura divergente**: Talhão declarado como "Milho" mas com padrão visual/NDVI de pastagem
+- **Falha de safra**: Plantio ocorreu mas a cultura falhou (seca, praga, granizo)
+- **Padrão anômalo**: Curva NDVI com forma que não corresponde à cultura declarada
+
+Sem essa verificação, o sistema gera datas de EOS, estimativas de produtividade e janelas de colheita para talhões que podem não ter sequer uma lavoura em pé — representando risco operacional e financeiro.
+
+### 9.2 Arquitetura: Duas Camadas
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                 PIPELINE DE CRITICIDADE DE CULTURA                      │
+├────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  CAMADA 1: ANÁLISE ALGORÍTMICA (custo zero, executa sempre)            │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │  crop-pattern.service.ts                                          │  │
+│  │  ├── Recebe: série temporal NDVI + tipo de cultura                │  │
+│  │  ├── Calcula métricas: peakNdvi, amplitude, cycleDuration,        │  │
+│  │  │   basalNdvi, growthRate, meanNdvi, stdNdvi                     │  │
+│  │  ├── Compara com thresholds específicos por cultura               │  │
+│  │  │   (8 culturas, 3 categorias: Annual/Semi-Perennial/Perennial) │  │
+│  │  └── Classifica: TYPICAL / ATYPICAL / ANOMALOUS / NO_CROP        │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│                          │                                              │
+│          ┌───────────────┼───────────────┐                              │
+│          ▼               ▼               ▼                              │
+│   ┌──────────┐   ┌────────────┐   ┌──────────┐                        │
+│   │ TYPICAL  │   │ ATYPICAL / │   │ NO_CROP  │                        │
+│   │          │   │ ANOMALOUS  │   │          │                        │
+│   │ Prossegue│   │ Chama      │   │ SHORT-   │                        │
+│   │ pipeline │   │ Verificador│   │ CIRCUIT  │                        │
+│   │ normal   │   │ IA         │   │ TOTAL    │                        │
+│   └──────────┘   └─────┬──────┘   └──────────┘                        │
+│                         │                                               │
+│  CAMADA 2: VERIFICADOR IA (condicional, gemini-2.5-flash-lite)         │
+│  ┌──────────────────────┴───────────────────────────────────────────┐  │
+│  │  verifier.ts + verifier-prompt.ts                                 │  │
+│  │  ├── Recebe: imagens curadas + NDVI tabela + área + cultura       │  │
+│  │  ├── Padrões visuais por cultura (CROP_VISUAL_PATTERNS)           │  │
+│  │  ├── Foco exclusivo: "A cultura X realmente existe neste campo?"  │  │
+│  │  └── Decide:                                                       │  │
+│  │      ├── CONFIRMED → cultura confirmada, prossegue                │  │
+│  │      ├── SUSPICIOUS → alerta, mas prossegue                       │  │
+│  │      ├── MISMATCH → SHORT-CIRCUIT (cultura errada)                │  │
+│  │      ├── NO_CROP → SHORT-CIRCUIT (sem cultivo)                    │  │
+│  │      └── CROP_FAILURE → flagged (falha de safra)                  │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.3 Culturas Suportadas e Thresholds
+
+O sistema define thresholds específicos para 8 culturas organizadas em 3 categorias:
+
+#### Culturas Anuais (ANNUAL)
+
+| Cultura | Peak NDVI Min | Amplitude Min | Ciclo (dias) | Growth Rate Min |
+|---------|--------------|---------------|-------------|-----------------|
+| SOJA | 0.55 | 0.30 | 80-160 | 0.003 |
+| MILHO | 0.60 | 0.35 | 90-180 | 0.004 |
+| GERGELIM | 0.45 | 0.25 | 70-150 | 0.002 |
+| CEVADA | 0.50 | 0.28 | 70-140 | 0.003 |
+| ALGODÃO | 0.55 | 0.30 | 120-200 | 0.002 |
+| ARROZ | 0.55 | 0.30 | 90-170 | 0.003 |
+
+#### Culturas Semi-Perenes (SEMI_PERENNIAL)
+
+| Cultura | Peak NDVI Min | Amplitude Min | Growth Rate Min |
+|---------|--------------|---------------|-----------------|
+| CANA | 0.50 | 0.20 | 0.001 |
+
+#### Culturas Perenes (PERENNIAL)
+
+| Cultura | Mean NDVI Min | Std NDVI Max | Peak NDVI Min |
+|---------|--------------|-------------|--------------|
+| CAFÉ | 0.35 | - | 0.40 |
+
+### 9.4 Lógica de Classificação
+
+#### Culturas Anuais
+
+```
+SE peakNdvi < threshold.noCropPeak E amplitude < threshold.noCropAmplitude:
+  → NO_CROP (shouldShortCircuit = true)
+
+SE peakNdvi < threshold.anomalousPeak OU
+   (!hasCycle E amplitude < threshold.expectedAmplitude × 0.6):
+  → ANOMALOUS (shouldCallVerifier = true)
+
+SE peakNdvi < threshold.peakMinNdvi OU
+   ciclo detectado mas fora do range (min-max dias) OU
+   SOS/EOS não detectados para cultura anual/semi-perene OU
+   amplitude < threshold.expectedAmplitude × 0.85:
+  → ATYPICAL (shouldCallVerifier = true)
+
+SENÃO:
+  → TYPICAL (prossegue normalmente)
+```
+
+> **Nota (v0.0.33):** Para culturas anuais e semi-perenes, a ausência de detecção
+> de SOS/EOS (`cycleDurationDays = null`) é tratada como ATYPICAL, pois uma cultura
+> anual saudável DEVE apresentar curva bell-shape com emergência e senescência
+> detectáveis. Amplitude abaixo de 85% do esperado para a cultura declarada também
+> aciona ATYPICAL, mesmo que o pico NDVI esteja acima do limiar mínimo.
+
+#### Culturas Perenes
+
+```
+SE meanNdvi < 0.20 OU peakNdvi < 0.25:
+  → NO_CROP (shouldShortCircuit = true)
+
+SE meanNdvi < threshold.meanNdviMin OU
+   peakNdvi < threshold.peakNdviMin:
+  → ANOMALOUS (shouldCallVerifier = true)
+
+SE meanNdvi < threshold.meanNdviMin × 1.15 OU
+   peakNdvi < threshold.peakNdviMin × 1.1:
+  → ATYPICAL (shouldCallVerifier = true)
+
+SENÃO:
+  → TYPICAL
+```
+
+### 9.5 Lógica de Short-Circuit
+
+O short-circuit é o mecanismo central que impede a geração de dados errôneos para talhões sem cultivo confirmado.
+
+#### No Pipeline de Processamento (`process/route.ts`)
+
+```
+                     analyzeCropPattern(ndviData, cropType)
+                                    │
+                  ┌─────────────────┼─────────────────┐
+                  ▼                                    ▼
+        shouldShortCircuit = true              shouldShortCircuit = false
+        (NO_CROP algorítmico)                  (ATYPICAL/ANOMALOUS/TYPICAL)
+                  │                                    │
+                  ▼                                    ▼
+        Salva AgroData mínimo:              Prossegue pipeline completo:
+        - cropPatternStatus                 - Dados complementares
+        - cropPatternData                   - Balanço hídrico
+        - campo status = PARTIAL            - GDD
+        - Limpa dados EOS/IA anteriores     - Fusão EOS
+        RETORNA IMEDIATAMENTE               - Validação IA (com Verifier)
+```
+
+#### No Pipeline de Validação IA (`ai-validation.service.ts`)
+
+```
+        Curador selecionou imagens
+                    │
+                    ▼
+    cropPatternResult.shouldCallVerifier?
+                    │
+            ┌───────┴───────┐
+            ▼               ▼
+          true            false
+            │               │
+            ▼               ▼
+    runVerifier()     Pula direto para Judge
+            │
+            ▼
+    verifier.status == NO_CROP ou MISMATCH?
+            │
+     ┌──────┴──────┐
+     ▼             ▼
+    SIM           NÃO
+     │             │
+     ▼             ▼
+  RETORNA       Prossegue
+  REJECTED      para Judge
+  (sem Judge)
+```
+
+### 9.6 Verificador IA — Detalhes
+
+#### Modelo e Custo
+
+- **Modelo**: `gemini-2.5-flash-lite` (baixo custo, alta velocidade)
+- **Imagens enviadas**: Máximo 8 (curadas pelo Curador)
+- **Input**: Imagens + tabela NDVI + área do talhão + cultura declarada + resultado algorítmico
+
+#### Padrões Visuais por Cultura (CROP_VISUAL_PATTERNS)
+
+O prompt do Verificador inclui padrões visuais esperados para cada uma das 8 culturas suportadas, como:
+
+- **Soja**: Linhas paralelas regulares, verde escuro homogêneo, espaçamento 0.45-0.5m
+- **Milho**: Linhas mais espaçadas, verde escuro alto, plantas maiores que soja
+- **Cana**: Linhas largas espaçadas, ciclo longo, crescimento contínuo
+- **Café**: Arbustos em grid regular, verde perene, cobertura permanente
+- etc.
+
+#### Formato de Resposta
+
+```json
+{
+  "status": "CONFIRMED | SUSPICIOUS | MISMATCH | NO_CROP | CROP_FAILURE",
+  "declaredCrop": "SOJA",
+  "visualAssessment": "Texto descritivo do que o agente observa",
+  "hypotheses": ["Hipótese 1", "Hipótese 2"],
+  "confidence": 0.85,
+  "evidence": ["Evidência visual 1", "Evidência visual 2"]
+}
+```
+
+### 9.7 Interface do Usuário
+
+#### Dashboard — Coluna "Cultura"
+
+A tabela de talhões inclui uma coluna "Cultura" com badges coloridos:
+
+| Status | Cor | Label | Descrição |
+|--------|-----|-------|-----------|
+| NO_CROP | Vermelho | Sem Cultivo | Solo exposto ou sem vegetação ativa |
+| ANOMALOUS | Laranja | Anômalo | Padrão NDVI não corresponde à cultura |
+| ATYPICAL | Âmbar | Atípico | Padrão NDVI parcialmente compatível |
+| TYPICAL | Verde | OK | Padrão NDVI normal para a cultura |
+
+Se `aiCropVerificationStatus` estiver presente e não for `CONFIRMED`, uma segunda linha mostra o status da verificação IA.
+
+#### Dashboard — Supressão de Resultados IA (v0.0.33)
+
+Quando um talhão apresenta **problema de cultura** (crop issue), os resultados do agente Judge são **suprimidos** na tabela do dashboard. As colunas afetadas exibem "—":
+
+| Coluna | Comportamento com Crop Issue |
+|--------|------------------------------|
+| IA (Acordo) | "—" (suprimido) |
+| EOS IA | "—" (suprimido) |
+| Pronta | "—" (suprimido) |
+| Conf. IA | "—" (suprimido) |
+
+**Condição de ativação (`hasCropIssue`)**:
+```
+cropPatternStatus ∈ {NO_CROP, ANOMALOUS, ATYPICAL}
+  OU
+aiCropVerificationStatus ∉ {CONFIRMED, null}
+```
+
+**Justificativa**: Quando a identidade da cultura está em questão, os resultados do Judge (que assume cultura correta) não são confiáveis e podem induzir o usuário a decisões erradas. Apenas a coluna "Cultura" com o status algorítmico/verificador permanece visível.
+
+**Implementação**: `field-table.tsx` — variáveis `aiAgreement`, `aiConf`, `aiEos`, `ready` são forçadas a `null` quando `hasCropIssue === true`.
+
+#### Dashboard — Filtro "Cultura"
+
+Novo grupo de filtros permite selecionar:
+- **Todos**: Sem filtro
+- **Problemas**: `NO_CROP` + `ANOMALOUS` (agrupado)
+- **NO_CROP**, **ANOMALOUS**, **ATYPICAL**, **TYPICAL**: Individual
+
+#### Relatório — Layout Orientado por Crop Issue (v0.0.33)
+
+O status de crop pattern é o **balizador de toda a interface** do relatório. Quando há problema de cultura, a página inteira reflete isso de forma coerente, sem apresentar dados contraditórios.
+
+**Cenário 1 — Crop Issue detectado** (NO_CROP, ANOMALOUS, ATYPICAL, ou Verifier ≠ CONFIRMED):
+
+O `CropAlertCard` é o primeiro elemento exibido (no TOPO, acima de todos os cards de dados). Os demais elementos da página são suprimidos ou limpos:
+
+| Componente | Comportamento |
+|------------|---------------|
+| **Alerta de Cultura** | Exibido no TOPO da página |
+| **MetricCards** | Área mantida; Volume, Aderência Histórica e Confiança exibem `---` |
+| **PhenologyTimeline** | EOS exibe `---` e "Sem projeção disponível"; Plantio/SOS mantidos |
+| **NDVI Chart** | Mantido (dados brutos são válidos para diagnóstico) |
+| **AnalysisTabs** | GDD, harvestWindow e eosAdjustment suprimidos; precipitação e solo mantidos |
+| **Seção AI Validation** | Completamente omitida (Judge não é relevante) |
+
+- Justificativa: quando a cultura é duvidosa, EOS/GDD/Volume são inválidos e induziriam o usuário a decisões erradas
+- O card é exibido imediatamente após processamento, mesmo antes da validação IA ser executada
+
+**Cenário 2 — Cultura confirmada** (TYPICAL + Verifier CONFIRMED ou ausente):
+- Todos os cards de dados exibidos normalmente
+- Painel completo de validação visual do Judge disponível
+- Comportamento padrão com resultados de Curador + Verificador + Juiz
+
+**Card de Alerta de Cultura** contém:
+- Status algorítmico com ícone e cor (vermelho para crítico, âmbar para warning)
+- Métricas NDVI relevantes (peak, amplitude, etc.)
+- Hipóteses geradas pelo serviço algorítmico
+- Dados do Verificador IA (se disponíveis)
+- Aviso claro: "Nenhum cálculo de EOS/colheita foi gerado" (para NO_CROP/MISMATCH)
+
+#### Status de Processamento — Crop Issue ≠ Erro
+
+Crop issue é um resultado **válido** de processamento, não uma falha parcial:
+
+| Situação | Status | Justificativa |
+|----------|--------|---------------|
+| NO_CROP / MISMATCH (short-circuit) | `SUCCESS` | Identificação correta de ausência de cultura |
+| ATYPICAL / ANOMALOUS (pipeline completo) | `SUCCESS` | SOS/EOS não detectados é esperado, não erro |
+| Sem dados NDVI da API | `PARTIAL` | Falha real de dados |
+| API timeout / erro de rede | `ERROR` | Falha de infraestrutura |
+
+**Implementação**: `process/route.ts` — flag `hasCropIssue` impede que missing SOS/EOS degrade o status para PARTIAL quando causado por problema de cultura.
+
+### 9.8 Hipóteses Geradas
+
+O serviço algorítmico gera hipóteses explanatórias para cada classificação:
+
+#### NO_CROP
+- "Solo exposto ou em preparo — sem vegetação ativa detectada"
+- "Possível área de pousio ou recém-dessecada"
+- "NDVI consistentemente abaixo do mínimo para qualquer cultura"
+
+#### ANOMALOUS
+- "Pico de NDVI (X) abaixo do esperado (Y) para [cultura]"
+- "Amplitude da curva (X) muito baixa para ciclo agrícola"
+- "Taxa de crescimento insuficiente para [cultura]"
+
+#### ATYPICAL
+- "Duração do ciclo (X dias) fora da faixa esperada (Y-Z dias)"
+- "SOS/EOS não detectados — ciclo indefinido para cultura anual"
+- "Amplitude (X) abaixo do esperado (Y) para [cultura]"
+- "Valores marginais — possível estresse ou plantio tardio"
+- "[cultura] sob estresse severo (hídrico, nutricional ou sanitário)"
+- "Plantio muito tardio ou replantio com ciclo comprimido"
+
+---
+
+## 10. Status de Implementação
+
+### 10.1 Fases Completadas
 
 | Fase | Descrição                                          | Status      |
 |------|---------------------------------------------------|-------------|
@@ -761,8 +1146,12 @@ Análise extensiva do fluxo de dados revelou 8 bugs que causavam divergência na
 | AI-5 | Painel de Validação Visual no Relatório           | ✅ COMPLETO |
 | FIX  | Correção Pipeline EOS (Single Source of Truth)    | ✅ COMPLETO |
 | UI   | Dashboard Avançado: Tabela Ordenável + Filtros    | ✅ COMPLETO |
+| CP   | Pipeline de Criticidade de Cultura (Verifier)     | ✅ COMPLETO |
+| FIX2 | EOS Sanity Check (GDD contradiction + NDVI priority) | ✅ COMPLETO |
+| CP2  | ATYPICAL Refinement (no-cycle + low-amplitude)    | ✅ COMPLETO |
+| UI2  | Supressão IA no Dashboard + Relatório para Crop Issues | ✅ COMPLETO |
 
-### 9.2 Fases Pendentes
+### 10.2 Fases Pendentes
 
 | Fase | Descrição                                          | Status      | Requisitos           |
 |------|---------------------------------------------------|-------------|----------------------|
@@ -783,9 +1172,9 @@ O sistema de auto-reprocessamento permitirá:
 
 ---
 
-## 10. Referências Bibliográficas
+## 11. Referências Bibliográficas
 
-### 10.1 NDVI e Fenologia
+### 11.1 NDVI e Fenologia
 
 1. **Rouse, J.W. et al. (1974)**  
    "Monitoring vegetation systems in the Great Plains with ERTS"  
@@ -795,7 +1184,7 @@ O sistema de auto-reprocessamento permitirá:
    "Intercomparison, interpretation, and assessment of spring phenology in North America"  
    *Global Change Biology*, 15(10), 2335-2359.
 
-### 10.2 Radar e Vegetação
+### 11.2 Radar e Vegetação
 
 3. **Kim, Y. & van Zyl, J.J. (2009)**  
    "A time-series approach to estimate soil moisture using polarimetric radar data"  
@@ -809,7 +1198,7 @@ O sistema de auto-reprocessamento permitirá:
    "Understanding the temporal behavior of crops using Sentinel-1 and Sentinel-2-like data for agricultural applications"  
    *Remote Sensing of Environment*, 199, 415-426.
 
-### 10.3 Soma Térmica
+### 11.3 Soma Térmica
 
 6. **McMaster, G.S. & Wilhelm, W.W. (1997)**  
    "Growing degree-days: one equation, two interpretations"  
@@ -819,7 +1208,7 @@ O sistema de auto-reprocessamento permitirá:
    "Stages of soybean development"  
    *Iowa State University Special Report*, 80.
 
-### 10.4 Balanço Hídrico
+### 11.4 Balanço Hídrico
 
 8. **Allen, R.G. et al. (1998)**  
    "Crop evapotranspiration: guidelines for computing crop water requirements"  
@@ -829,7 +1218,7 @@ O sistema de auto-reprocessamento permitirá:
    "The water balance"  
    *Publications in Climatology*, 8(1).
 
-### 10.5 Fusão de Dados e Detecção de Maturidade
+### 11.5 Fusão de Dados e Detecção de Maturidade
 
 10. **Sakamoto, T. et al. (2020)**  
     "PhenoCrop: An integrated satellite-based framework to estimate physiological growth stages of corn and soybeans"  
@@ -855,7 +1244,7 @@ O sistema de auto-reprocessamento permitirá:
     *USDA National Institute of Food and Agriculture*.  
     *Nota: Fusão NDVI + GDD = 77% acurácia milho, 71% soja*
 
-### 10.6 ZARC e Riscos
+### 11.6 ZARC e Riscos
 
 15. **MAPA/EMBRAPA (2023)**  
     "Zoneamento Agrícola de Risco Climático"  
@@ -886,15 +1275,18 @@ O sistema de auto-reprocessamento permitirá:
 ```
 merx-agro-mvp/
 ├── lib/
-│   ├── agents/                          # IA Visual Validation (v0.0.29)
+│   ├── agents/                          # IA Visual Validation (v0.0.29 + v0.0.32)
 │   │   ├── curator.ts                   # Agente Curador
+│   │   ├── verifier.ts                  # Agente Verificador de Cultura (v0.0.32)
 │   │   ├── judge.ts                     # Agente Juiz
 │   │   ├── curator-prompt.ts            # Prompt do Curador
+│   │   ├── verifier-prompt.ts           # Prompt do Verificador (v0.0.32)
 │   │   ├── judge-prompt.ts              # Prompt do Juiz (critérios v0.0.30)
-│   │   └── types.ts                     # Tipos compartilhados
+│   │   └── types.ts                     # Tipos compartilhados (+CropVerification v0.0.32)
 │   ├── evalscripts.ts                   # Scripts Sentinel Hub (S2 TC, S2 NDVI, S1 Radar, Landsat NDVI, S3 NDVI)
 │   └── services/
-│       ├── ai-validation.service.ts     # Orquestrador IA (v0.0.29)
+│       ├── ai-validation.service.ts     # Orquestrador IA (v0.0.29, +Verifier v0.0.32)
+│       ├── crop-pattern.service.ts     # Análise algorítmica de padrão de cultura (v0.0.32)
 │       ├── eos-fusion.service.ts        # Fusão EOS (corrigido v0.0.30)
 │       ├── thermal.service.ts           # GDD (backtracking v0.0.30)
 │       ├── feature-flags.service.ts
@@ -908,9 +1300,9 @@ merx-agro-mvp/
 │       └── phenology.service.ts
 ├── components/
 │   ├── fields/
-│   │   └── field-table.tsx              # Tabela ordenável 13 cols (v0.0.31)
+│   │   └── field-table.tsx              # Tabela ordenável 14 cols (+Cultura v0.0.32)
 │   ├── ai-validation/                   # UI de Validação Visual (v0.0.29)
-│   │   └── AIValidationPanel.tsx        # Painel com normalização (v0.0.30)
+│   │   └── AIValidationPanel.tsx        # Painel com normalização (v0.0.30) + Alerta Cultura (v0.0.32)
 │   ├── charts/
 │   │   ├── PrecipitationChart.tsx
 │   │   ├── WaterBalanceChart.tsx
@@ -925,18 +1317,18 @@ merx-agro-mvp/
 ├── app/
 │   ├── api/
 │   │   ├── fields/
-│   │   │   ├── route.ts                 # GET lista (server-side processing v0.0.31)
+│   │   │   ├── route.ts                 # GET lista (+cropPatternStatus v0.0.32)
 │   │   │   └── [id]/
 │   │   │       ├── route.ts             # GET talhão (fusedEos v0.0.30)
-│   │   │       ├── process/route.ts     # POST (EOS fix + IA v0.0.30)
-│   │   │       └── ai-validate/route.ts # POST validação manual (v0.0.29)
+│   │   │       ├── process/route.ts     # POST (+crop-pattern short-circuit v0.0.32)
+│   │   │       └── ai-validate/route.ts # POST validação manual (+verifier v0.0.32)
 │   │   └── workspace/settings/route.ts
 │   └── (authenticated)/
-│       ├── page.tsx                     # Dashboard (filtros avançados v0.0.31)
-│       ├── reports/[id]/page.tsx        # Relatório (6 sensores v0.0.31)
+│       ├── page.tsx                     # Dashboard (+filtro Cultura v0.0.32)
+│       ├── reports/[id]/page.tsx        # Relatório (+Alerta Cultura v0.0.32)
 │       └── settings/page.tsx           # Config IA + módulos
 ├── prisma/
-│   └── schema.prisma                    # +AI fields (v0.0.29)
+│   └── schema.prisma                    # +AI fields (v0.0.29), +cropPattern/verification (v0.0.32)
 └── docs/
     ├── METHODOLOGY-V2.md                # ← Este documento
     └── PLAN-AI-VISUAL-VALIDATION.md     # Plano original da IA Visual
@@ -944,4 +1336,4 @@ merx-agro-mvp/
 
 ---
 
-*Documento gerado automaticamente. Última atualização: Fevereiro 2026 (v0.0.31)*
+*Documento gerado automaticamente. Última atualização: Fevereiro 2026 (v0.0.32)*

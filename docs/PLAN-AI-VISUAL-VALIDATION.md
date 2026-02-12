@@ -1,5 +1,7 @@
 # Plano: Validação Visual por IA (Agentes Curador + Juiz)
 
+> **Nota (v0.0.33):** Este plano original descrevia um pipeline de 2 agentes (Curador + Juiz). A implementação atual (v0.0.32+) evoluiu para um pipeline de **3 agentes** (Curador → Verificador → Juiz), com o Agente Verificador atuando como gate para confirmar a identidade da cultura antes de acionar o Juiz. Consulte [METHODOLOGY-V2.md](./METHODOLOGY-V2.md) seção 9 para a documentação atualizada.
+
 **Data:** Fevereiro 2026  
 **Versão do Sistema:** 0.0.28  
 **Origem:** POC Image Analysis (`C:\Users\felip\Documents\Image Analysis`)  

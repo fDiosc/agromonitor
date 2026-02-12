@@ -253,7 +253,8 @@ app/api/
 |---------|---------|--------|
 | Merx | `merx.service.ts` | Integração com API de satélite |
 | Phenology | `phenology.service.ts` | Detecção de fenologia + EOS dinâmico |
-| EOS Fusion | `eos-fusion.service.ts` | Fusão NDVI + GDD + Balanço Hídrico (single source of truth) |
+| EOS Fusion | `eos-fusion.service.ts` | Fusão NDVI + GDD + Balanço Hídrico (single source of truth, sanity check v0.0.33) |
+| Crop Pattern | `crop-pattern.service.ts` | Análise algorítmica de padrão de cultura (8 culturas, 3 categorias) |
 | Thermal | `thermal.service.ts` | Soma térmica (GDD) com backtracking de maturação |
 | Water Balance | `water-balance.service.ts` | Balanço hídrico + ajuste EOS por estresse |
 | Climate Envelope | `climate-envelope.service.ts` | Bandas históricas (Bollinger-like) |
@@ -274,10 +275,12 @@ app/api/
 | Agente | Arquivo | Função |
 |--------|---------|--------|
 | Curator | `curator.ts` | Seleção e pontuação de imagens de satélite |
+| Verifier | `verifier.ts` | Confirmação visual da cultura declarada (flash-lite) |
 | Judge | `judge.ts` | Validação fenológica por visão computacional |
 | Curator Prompt | `curator-prompt.ts` | Template de prompt do Curador |
+| Verifier Prompt | `verifier-prompt.ts` | Template de prompt do Verificador com padrões visuais por cultura |
 | Judge Prompt | `judge-prompt.ts` | Template de prompt do Juiz com critérios de decisão |
-| Types | `types.ts` | Interfaces compartilhadas dos agentes |
+| Types | `types.ts` | Interfaces compartilhadas (incl. CropVerification, VerifierAnalysis) |
 | Evalscripts | `evalscripts.ts` | Scripts Sentinel Hub (S2 True Color, S2 NDVI, S1 Radar, Landsat NDVI, S3 NDVI) |
 
 ### 4. Data Layer (Persistence)
@@ -403,7 +406,7 @@ model Analysis {
      └───────────────────────────────────────────────────┘
 ```
 
-### Fluxo de Dados EOS (Single Source of Truth - v0.0.30)
+### Fluxo de Dados EOS (Single Source of Truth - v0.0.30, sanity check v0.0.33)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -415,6 +418,12 @@ model Analysis {
 │                                                                  │
 │  eos-fusion.service ──→ FUSED EOS (canônico)                    │
 │    ↕ campos: date, method, confidence, passed                    │
+│    ↕ v0.0.33: NDVI prevalece sobre GDD em contradições          │
+│    ↕ v0.0.33: GDD passado + NDVI ativo → projeção futura       │
+│                                                                  │
+│  crop-pattern.service ──→ classifica cultura (v0.0.32/33)       │
+│    ↕ NO_CROP/MISMATCH → short-circuit (EOS não calculado)       │
+│    ↕ ATYPICAL → ciclo indefinido ou baixa amplitude             │
 │                                                                  │
 │  process/route.ts                                                │
 │    ├── persiste em agroData.eosDate (NDVI bruto)                │
@@ -512,11 +521,12 @@ Base URL: `https://api.merx.app.br`
 |-----|--------|-----|
 | Templates de Análise | `gemini-3-flash-preview` | `@google/genai` |
 | Agente Curador (Visual) | `gemini-2.5-flash-lite` ou `gemini-3-flash-preview` | `@google/genai` |
+| Agente Verificador (Cultura) | `gemini-2.5-flash-lite` | `@google/genai` |
 | Agente Juiz (Visual) | `gemini-3-flash-preview` | `@google/genai` |
 
 **Uso em Templates**: Geração de análises textuais (Crédito, Logística, Risco).
 
-**Uso em Validação Visual (v0.0.29)**: Agentes multimodais que analisam imagens de satélite para confirmar ou questionar projeções algorítmicas de fenologia.
+**Uso em Validação Visual (v0.0.29, atualizado v0.0.32/v0.0.33)**: Pipeline de 3 agentes (Curator → Verifier → Judge) que analisam imagens de satélite para confirmar cultura declarada e validar projeções de fenologia. Verifier opera como gate para o Judge, com short-circuit em NO_CROP/MISMATCH. Resultados do Judge são suprimidos no dashboard e relatório quando crop issues são detectados.
 
 ### Sentinel Hub (Copernicus Data Space)
 

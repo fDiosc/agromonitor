@@ -21,6 +21,7 @@ import {
 } from '@/lib/services/sar-ndvi-adaptive.service'
 import { runAIValidation, type AIValidationResult } from '@/lib/services/ai-validation.service'
 import { calculateFusedEos, type EosFusionResult } from '@/lib/services/eos-fusion.service'
+import { analyzeCropPattern, type CropPatternResult } from '@/lib/services/crop-pattern.service'
 
 interface RouteParams {
   params: { id: string }
@@ -90,6 +91,107 @@ export async function POST(
       // Log se plantio foi informado
       if (plantingDateInput) {
         console.log(`[PROCESS] Data de plantio informada pelo produtor: ${plantingDateInput}`)
+      }
+
+      // =======================================================
+      // VERIFICAÇÃO DE PADRÃO DE CULTURA (algorítmico, custo zero)
+      // Roda ANTES dos cálculos pesados. Se NO_CROP, curto-circuita.
+      // =======================================================
+      const cropPatternResult: CropPatternResult = analyzeCropPattern(
+        merxReport.ndvi,
+        field.cropType,
+        phenology.sosDate,
+        phenology.eosDate
+      )
+
+      console.log(`[PROCESS] Crop Pattern: ${cropPatternResult.status} (${cropPatternResult.cropCategory}) - ${cropPatternResult.reason}`)
+
+      // NO_CROP SHORT-CIRCUIT: Nenhum cálculo adicional necessário
+      if (cropPatternResult.shouldShortCircuit) {
+        console.log(`[PROCESS] SHORT-CIRCUIT: ${cropPatternResult.status} -- salvando dados mínimos e retornando`)
+
+        // Save minimal AgroData with crop pattern info
+        await prisma.agroData.upsert({
+          where: { fieldId: params.id },
+          update: {
+            areaHa,
+            volumeEstimatedKg: 0,
+            peakNdvi: cropPatternResult.metrics.peakNdvi,
+            phenologyHealth: 'POOR',
+            confidenceScore: 10,
+            confidence: 'LOW',
+            phenologyMethod: 'ALGORITHM',
+            rawNdviData: JSON.stringify(merxReport.ndvi),
+            rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
+            cropPatternStatus: cropPatternResult.status,
+            cropPatternData: JSON.stringify({
+              metrics: cropPatternResult.metrics,
+              hypotheses: cropPatternResult.hypotheses,
+              reason: cropPatternResult.reason,
+              cropCategory: cropPatternResult.cropCategory,
+            }),
+            // Clear any previous EOS/AI data since there's no crop
+            eosDate: null,
+            sosDate: null,
+            peakDate: null,
+            cycleDays: null,
+            plantingDate: null,
+            aiValidationResult: null,
+            aiValidationAgreement: null,
+            aiEosAdjustedDate: null,
+            aiValidationConfidence: null,
+            aiVisualAlerts: null,
+            diagnostics: JSON.stringify([{
+              type: 'ERROR',
+              code: cropPatternResult.status,
+              message: cropPatternResult.reason,
+            }]),
+            updatedAt: new Date(),
+          },
+          create: {
+            fieldId: params.id,
+            areaHa,
+            volumeEstimatedKg: 0,
+            peakNdvi: cropPatternResult.metrics.peakNdvi,
+            phenologyHealth: 'POOR',
+            confidenceScore: 10,
+            confidence: 'LOW',
+            phenologyMethod: 'ALGORITHM',
+            rawNdviData: JSON.stringify(merxReport.ndvi),
+            rawHistoricalData: JSON.stringify(merxReport.historical_ndvi),
+            cropPatternStatus: cropPatternResult.status,
+            cropPatternData: JSON.stringify({
+              metrics: cropPatternResult.metrics,
+              hypotheses: cropPatternResult.hypotheses,
+              reason: cropPatternResult.reason,
+              cropCategory: cropPatternResult.cropCategory,
+            }),
+            diagnostics: JSON.stringify([{
+              type: 'ERROR',
+              code: cropPatternResult.status,
+              message: cropPatternResult.reason,
+            }]),
+          },
+        })
+
+        // Update field status — crop issue is a valid processing result, not a partial failure
+        const finalStatus = 'SUCCESS'
+        await prisma.field.update({
+          where: { id: params.id },
+          data: {
+            status: finalStatus,
+            processedAt: new Date(),
+          },
+        })
+
+        return NextResponse.json({
+          success: true,
+          cropPatternStatus: cropPatternResult.status,
+          reason: cropPatternResult.reason,
+          hypotheses: cropPatternResult.hypotheses,
+          warnings: [`Cultura não identificada: ${cropPatternResult.reason}`],
+          processingTimeMs: Date.now() - startTime,
+        })
       }
 
       // Calcular correlação histórica robusta
@@ -753,6 +855,7 @@ export async function POST(
                 radarContribution: fusionMetrics.radarContribution,
                 continuityScore: fusionMetrics.continuityScore
               } : undefined,
+              cropPatternResult,
               curatorModel: featureFlags.aiCuratorModel
             })
 
@@ -801,6 +904,14 @@ export async function POST(
           zarcOptimalEnd: zarcAnalysis.window?.optimalEnd || null,
           zarcPlantingRisk: zarcAnalysis.plantingRisk,
           zarcPlantingStatus: zarcAnalysis.plantingStatus !== 'UNKNOWN' ? zarcAnalysis.plantingStatus : null,
+          // Verificação de padrão de cultura (algorítmico)
+          cropPatternStatus: cropPatternResult.status,
+          cropPatternData: JSON.stringify({
+            metrics: cropPatternResult.metrics,
+            hypotheses: cropPatternResult.hypotheses,
+            reason: cropPatternResult.reason,
+            cropCategory: cropPatternResult.cropCategory,
+          }),
           // Validação Visual IA
           ...(aiValidationResult ? {
             aiValidationResult: aiValidationResult.agreement,
@@ -818,6 +929,11 @@ export async function POST(
             aiVisualAlerts: JSON.stringify(aiValidationResult.visualAlerts),
             aiCurationReport: JSON.stringify(aiValidationResult.curationReport),
             aiCostReport: JSON.stringify(aiValidationResult.costReport),
+            // Crop verification from Verifier agent (if called)
+            ...(aiValidationResult.cropVerification ? {
+              aiCropVerificationStatus: aiValidationResult.cropVerification.status,
+              aiCropVerificationData: JSON.stringify(aiValidationResult.cropVerification),
+            } : {}),
           } : {}),
           diagnostics: JSON.stringify(phenology.diagnostics),
           updatedAt: new Date()
@@ -852,6 +968,14 @@ export async function POST(
           zarcOptimalEnd: zarcAnalysis.window?.optimalEnd || null,
           zarcPlantingRisk: zarcAnalysis.plantingRisk,
           zarcPlantingStatus: zarcAnalysis.plantingStatus !== 'UNKNOWN' ? zarcAnalysis.plantingStatus : null,
+          // Verificação de padrão de cultura (algorítmico)
+          cropPatternStatus: cropPatternResult.status,
+          cropPatternData: JSON.stringify({
+            metrics: cropPatternResult.metrics,
+            hypotheses: cropPatternResult.hypotheses,
+            reason: cropPatternResult.reason,
+            cropCategory: cropPatternResult.cropCategory,
+          }),
           // Validação Visual IA
           ...(aiValidationResult ? {
             aiValidationResult: aiValidationResult.agreement,
@@ -869,6 +993,10 @@ export async function POST(
             aiVisualAlerts: JSON.stringify(aiValidationResult.visualAlerts),
             aiCurationReport: JSON.stringify(aiValidationResult.curationReport),
             aiCostReport: JSON.stringify(aiValidationResult.costReport),
+            ...(aiValidationResult.cropVerification ? {
+              aiCropVerificationStatus: aiValidationResult.cropVerification.status,
+              aiCropVerificationData: JSON.stringify(aiValidationResult.cropVerification),
+            } : {}),
           } : {}),
           diagnostics: JSON.stringify(phenology.diagnostics)
         }
@@ -930,8 +1058,15 @@ export async function POST(
       // =======================================================
       const warnings: string[] = []
       let finalStatus: 'SUCCESS' | 'PARTIAL' | 'ERROR' = 'SUCCESS'
+
+      // When crop pattern indicates an issue (ATYPICAL, ANOMALOUS, NO_CROP),
+      // missing SOS/EOS is expected and should NOT downgrade to PARTIAL.
+      // PARTIAL is reserved for actual data failures (no NDVI, API errors, etc.)
+      const hasCropIssue = cropPatternResult.status === 'NO_CROP' 
+        || cropPatternResult.status === 'ANOMALOUS' 
+        || cropPatternResult.status === 'ATYPICAL'
       
-      // Verificar dados NDVI
+      // Verificar dados NDVI — this IS a real data failure
       if (!merxReport.ndvi || merxReport.ndvi.length === 0) {
         warnings.push('Sem dados NDVI da API')
         finalStatus = 'PARTIAL'
@@ -939,21 +1074,21 @@ export async function POST(
         warnings.push(`Poucos pontos NDVI (${merxReport.ndvi.length})`)
       }
       
-      // Verificar fenologia crítica
+      // Verificar fenologia crítica — only mark PARTIAL if NOT caused by crop issue
       if (!phenology.sosDate) {
         warnings.push('Não foi possível detectar emergência (SOS)')
-        finalStatus = 'PARTIAL'
+        if (!hasCropIssue) finalStatus = 'PARTIAL'
       }
       
       if (!phenology.eosDate) {
         warnings.push('Não foi possível detectar/projetar colheita (EOS)')
-        finalStatus = 'PARTIAL'
+        if (!hasCropIssue) finalStatus = 'PARTIAL'
       }
       
-      // Verificar confiança
+      // Verificar confiança — only mark PARTIAL if NOT caused by crop issue
       if (phenology.confidenceScore < 30) {
         warnings.push(`Confiança muito baixa (${phenology.confidenceScore}%)`)
-        if (finalStatus === 'SUCCESS') finalStatus = 'PARTIAL'
+        if (!hasCropIssue && finalStatus === 'SUCCESS') finalStatus = 'PARTIAL'
       }
       
       // Verificar área muito grande (pode causar problemas na API)

@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.0.31'
+export const APP_VERSION = '0.0.33'
 
 // Fases do produto
 export const VERSION_PHASES = {
@@ -25,6 +25,38 @@ export const CHANGELOG: ChangelogEntry[] = [
   // ==================== ALPHA (0.0.x) ====================
   // Changelog consolidado - apenas features finais implementadas
   
+  {
+    version: '0.0.33',
+    date: '2026-02-12',
+    title: 'Sanidade EOS + ATYPICAL + Supressão IA',
+    type: 'fix',
+    changes: [
+      'EOS Fusion: NDVI prevalece sobre GDD em contradições (planta verde com GDD 100% não declara maturação)',
+      'EOS Fusion: GDD passado + NDVI ativo → projeção futura com confiança reduzida',
+      'Classificação ATYPICAL refinada: ciclo indefinido (sem SOS/EOS) e baixa amplitude para culturas anuais',
+      'Relatório: Alerta de Cultura no TOPO; cards de Volume, EOS, GDD suprimidos quando crop issue',
+      'Relatório: crop issues mostram apenas card algorítmico, painel Judge é suprimido',
+      'Dashboard: colunas IA, EOS IA, Pronta e Conf. IA mostram "—" quando crop issue detectado',
+      'Status: crop issue (NO_CROP, ATYPICAL, ANOMALOUS) gera "Processado" em vez de "Parcial"',
+      'Correção TypeError: Array.isArray guard em hypotheses/evidence do Verificador',
+    ],
+  },
+  {
+    version: '0.0.32',
+    date: '2026-02-11',
+    title: 'Pipeline de Criticidade de Cultura',
+    type: 'feature',
+    changes: [
+      'Verificação algorítmica de padrão de cultura (8 tipos: soja, milho, gergelim, cevada, algodão, arroz, café, cana)',
+      'Classificação automática: TYPICAL, ATYPICAL, ANOMALOUS, NO_CROP',
+      'Short-circuit em NO_CROP: nenhum cálculo de EOS, GDD ou IA é executado',
+      'Agente Verificador IA: confirma visualmente quando padrão algorítmico é suspeito',
+      'Pipeline Curator → Verifier → Judge com corte automático em NO_CROP/MISMATCH',
+      'Suporte a 3 categorias: Anuais, Semi-perenes (cana), Perenes (café)',
+      'Dashboard: coluna Cultura com status visual e filtro dedicado',
+      'Alerta crítico no relatório para campos sem cultivo identificável',
+    ],
+  },
   {
     version: '0.0.31',
     date: '2026-02-11',

@@ -929,29 +929,56 @@ interface RiskMatrixResult {
 
 ---
 
-## 11. Validação Visual por IA (v0.0.29)
+## 11. Validação Visual por IA (v0.0.32)
 
 ### 11.1 Visão Geral
 
-O sistema implementa um pipeline de validação visual que usa IA multimodal (Google Gemini) para confirmar ou questionar as projeções algorítmicas de fenologia a partir de imagens de satélite reais.
+O sistema implementa um pipeline de criticidade de cultura e validação visual que usa análise algorítmica de padrões NDVI e IA multimodal (Google Gemini) para verificar a presença da cultura declarada e confirmar ou questionar as projeções algorítmicas.
+
+### 11.1a Pipeline de Criticidade de Cultura (v0.0.32)
+
+Antes da validação visual, uma análise algorítmica (custo zero) verifica se a curva NDVI é compatível com a cultura declarada:
+
+- **Culturas suportadas**: Soja, Milho, Gergelim, Cevada, Algodão, Arroz (anuais), Cana (semi-perene), Café (perene)
+- **Classificações**: TYPICAL, ATYPICAL, ANOMALOUS, NO_CROP
+- **NO_CROP**: Short-circuit total — nenhum cálculo de EOS, GDD, volume ou IA é executado
+- **ANOMALOUS**: Agente Verificador IA confirma visualmente antes de prosseguir ao Judge
+- **ATYPICAL (v0.0.33)**: Inclui culturas anuais sem detecção de SOS/EOS (ciclo indefinido) e amplitude NDVI abaixo de 85% do esperado
+- **Agente Verificador**: Modelo flash-lite, especializado em identificar presença/ausência de cultura
+- **Supressão IA (v0.0.33)**: Quando crop issue detectado (NO_CROP, ANOMALOUS, ATYPICAL ou Verifier ≠ CONFIRMED), resultados do Judge são suprimidos no dashboard e relatório
+- **Layout orientado por crop issue (v0.0.33)**: Alerta de Cultura no TOPO do relatório; cards de Volume, EOS, GDD, Confiança suprimidos; status de processamento é `SUCCESS` (não `PARTIAL`)
 
 ### 11.2 Arquitetura de Agentes
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                  PIPELINE DE VALIDAÇÃO VISUAL                    │
+│             PIPELINE DE CRITICIDADE + VALIDAÇÃO VISUAL           │
 ├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  0. VERIFICAÇÃO DE PADRÃO (algorítmico, custo zero)              │
+│     ├── Analisa curva NDVI vs thresholds por cultura             │
+│     ├── 8 culturas em 3 categorias (anual/semi-perene/perene)   │
+│     ├── NO_CROP → short-circuit (nenhum cálculo posterior)       │
+│     └── ANOMALOUS → aciona Verificador IA                        │
 │                                                                  │
 │  1. BUSCA DE IMAGENS (Sentinel Hub Process API)                  │
 │     ├── True Color (Sentinel-2 L2A)                              │
 │     ├── NDVI Colorizado (com legenda de threshold)               │
-│     └── Radar Composto (Sentinel-1 GRD - VV/VH)                 │
+│     ├── Radar Composto (Sentinel-1 GRD - VV/VH)                 │
+│     ├── Landsat 8/9 NDVI (campos > 200 ha)                      │
+│     └── Sentinel-3 OLCI NDVI (campos > 500 ha)                  │
 │                                                                  │
 │  2. AGENTE CURADOR                                               │
 │     ├── Modelo: gemini-2.5-flash-lite (padrão)                   │
 │     ├── Avalia qualidade das imagens (nuvens, cobertura)         │
 │     ├── Pontua cada imagem (0-100)                               │
-│     └── Seleciona as melhores para o Juiz                        │
+│     └── Seleciona as melhores para Verificador/Juiz              │
+│                                                                  │
+│  2.5 AGENTE VERIFICADOR (se ANOMALOUS ou ATYPICAL)              │
+│     ├── Modelo: gemini-2.5-flash-lite                            │
+│     ├── Verifica se cultura declarada está presente              │
+│     ├── Status: CONFIRMED/SUSPICIOUS/MISMATCH/NO_CROP/FAILURE   │
+│     └── NO_CROP/MISMATCH → short-circuit (Judge não executa)    │
 │                                                                  │
 │  3. AGENTE JUIZ                                                  │
 │     ├── Modelo: gemini-3-flash-preview                           │
@@ -1036,6 +1063,7 @@ O sistema utiliza múltiplos modelos do **Google Gemini**:
 |-----|--------|-----|----------|
 | Templates de Análise | `gemini-3-flash-preview` | `@google/genai` | Riscos, recomendações |
 | Agente Curador | `gemini-2.5-flash-lite` (padrão) | `@google/genai` | Seleção de imagens |
+| Agente Verificador | `gemini-2.5-flash-lite` | `@google/genai` | Confirmação visual de cultura |
 | Agente Juiz | `gemini-3-flash-preview` | `@google/genai` | Validação visual multimodal |
 
 **Fallback**: Regras automáticas quando IA indisponível (tanto para templates quanto validação visual).
@@ -1087,6 +1115,8 @@ Todas as análises geradas por modelos de linguagem (LLM) exibem:
 | 3.0.0 | 2026-02 | **Validação Visual IA**: Pipeline Curador + Juiz multimodal com Gemini, busca de imagens Sentinel Hub, 3 modos de trigger, normalização PT→EN, critérios de decisão quantitativos |
 | 3.1.0 | 2026-02 | **Correção Pipeline EOS**: Single source of truth, GDD backtracking, mapeamento stress PT→EN, server-side canonical fusedEos, eliminação de divergência client/server |
 | 3.2.0 | 2026-02 | **Dashboard Avançado**: Tabela ordenável com 13 colunas, filtros de janela de colheita/confiança/IA, correção mapeamento de campos AI na API, 6 fontes de dados no card IA |
+| 4.0.0 | 2026-02 | **Pipeline de Criticidade de Cultura**: Verificação algorítmica de padrão NDVI para 8 culturas (3 categorias), Agente Verificador IA, short-circuit NO_CROP, dashboard com coluna/filtro de cultura |
+| 4.1.0 | 2026-02 | **Sanidade EOS + ATYPICAL**: NDVI prevalece sobre GDD em contradições, GDD override para datas passadas, ATYPICAL refinado (ciclo indefinido + baixa amplitude), supressão de resultados Judge no dashboard/relatório para crop issues |
 
 ---
 

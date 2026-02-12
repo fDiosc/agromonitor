@@ -22,6 +22,84 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.33] - 2026-02-12
+
+### Sanidade EOS, Refinamento ATYPICAL e Supressão IA para Crop Issues
+
+Correções críticas na fusão EOS para evitar projeções contraditórias, refinamento da classificação ATYPICAL para culturas anuais, e ajuste UI/UX para suprimir resultados de IA quando a identidade da cultura está em dúvida.
+
+#### Corrigido
+
+- **`eos-fusion.service.ts` — GDD Contradiction Override**: Quando o EOS calculado por GDD está no passado mas NDVI ao vivo > 0.55 (planta ainda verde), o sistema agora projeta uma data futura com confiança reduzida em 50%, em vez de retornar a data passada com alta confiança
+- **`eos-fusion.service.ts` — NDVI Priority in Phenological Stage**: `determinePhenologicalStage` agora prioriza dados NDVI reais sobre progresso GDD:
+  - NDVI > 0.7 → VEGETATIVE (crescimento ativo, independente do GDD)
+  - NDVI > 0.55 → REPRODUCTIVE (mesmo com GDD > 90%)
+  - GDD ≥ 100% mas NDVI > 0.65 → NÃO declara MATURATION
+- **`crop-pattern.service.ts` — ATYPICAL para ciclo indefinido**: `classifyAnnual` agora classifica como ATYPICAL quando:
+  - `cycleDurationDays === null` (SOS/EOS não detectados para cultura anual — ciclo indefinido)
+  - `amplitude < expectedAmplitude * 0.85` (amplitude significativamente abaixo do esperado)
+- **`AIValidationPanel.tsx` — Array.isArray guard**: Adicionado verificação `Array.isArray()` antes de `.join()` em `cropVerifData.hypotheses` e `cropVerifData.evidence`, evitando `TypeError` quando dados chegam como string
+
+#### Alterado
+
+- **`AIValidationPanel.tsx` — Supressão do painel Judge para crop issues**: Quando `hasCropIssue` (NO_CROP, ANOMALOUS, ATYPICAL, ou Verifier ≠ CONFIRMED), o componente retorna apenas o `CropAlertCard` algorítmico. O painel completo de validação visual do Judge é completamente suprimido
+- **`AIValidationPanel.tsx` — Card algorítmico imediato**: O `CropAlertCard` é exibido imediatamente após processamento, mesmo antes da validação IA ser executada, para talhões com ATYPICAL
+- **`reports/[id]/page.tsx` — Layout reestruturado para crop issues**: Quando `hasCropIssue`:
+  - **Alerta de Cultura no TOPO** da página (acima de todos os cards de dados)
+  - **MetricCards**: Volume, Aderência Histórica e Confiança suprimidos (exibem `---`)
+  - **PhenologyTimeline**: EOS e dados de fusão suprimidos (exibe `---` e "Sem projeção disponível")
+  - **AnalysisTabs**: GDD, harvestWindow e eosAdjustment suprimidos (aba GDD não aparece)
+  - **Seção AI Validation**: Não duplica o alerta — se crop issue, seção Judge é omitida
+- **`field-table.tsx` — Supressão de colunas IA no dashboard**: Quando `hasCropIssue` é detectado, as colunas IA (Acordo), EOS IA, Pronta e Conf. IA exibem "—" em vez de dados do Judge que seriam enganosos
+- **`process/route.ts` — Status corrigido para crop issues**: 
+  - Short-circuit (NO_CROP/MISMATCH): status mudou de `PARTIAL` para `SUCCESS` — crop issue é um resultado válido, não erro
+  - Normal path: missing SOS/EOS causado por crop issue (ATYPICAL/ANOMALOUS) não degrada para `PARTIAL`. `PARTIAL` reservado exclusivamente para falhas reais de dados (sem NDVI, API fora, etc.)
+- **`phenology-timeline.tsx` — Estado limpo sem EOS**: Quando `eosDate` é null, mostra "Sem projeção disponível" em vez de "Status: DETECÇÃO REAL"
+- **`docs/METHODOLOGY-V2.md`**: Atualizado para v4.1 com documentação completa das correções EOS, novo comportamento ATYPICAL, e regras de supressão IA
+
+---
+
+## [0.0.32] - 2026-02-11
+
+### Pipeline de Criticidade de Cultura (Crop Criticality Pipeline)
+
+Implementação de um pipeline algorítmico + IA que verifica se a cultura declarada está realmente presente no talhão, evitando cálculos desnecessários e alertando o usuário sobre riscos.
+
+#### Adicionado
+
+- **`crop-pattern.service.ts`**: Validador algorítmico de padrão NDVI por cultura com thresholds específicos para 8 tipos de cultura em 3 categorias:
+  - **Anuais**: Soja, Milho, Gergelim, Cevada, Algodão, Arroz
+  - **Semi-perene**: Cana-de-açúcar (ciclo longo, queda abrupta no corte é esperada)
+  - **Perene**: Café (NDVI estável, sem ciclo SOS/EOS anual)
+- **Agente Verificador (`verifier.ts` + `verifier-prompt.ts`)**: Agente intermediário entre Curator e Judge que confirma visualmente a presença da cultura declarada
+  - Status: CONFIRMED | SUSPICIOUS | MISMATCH | NO_CROP | CROP_FAILURE
+  - Usa modelo flash-lite para custo mínimo
+  - Recebe padrões visuais específicos por cultura
+- **Classificação automática**: TYPICAL, ATYPICAL, ANOMALOUS, NO_CROP
+  - NO_CROP: nenhum cálculo adicional (EOS, GDD, volume, IA) é executado
+  - ANOMALOUS: Verificador IA confirma visualmente antes de prosseguir
+  - ATYPICAL: pipeline completo com contexto adicional
+- **Pipeline Curator → Verifier → Judge**:
+  - Short-circuit em NO_CROP/MISMATCH: Judge não é chamado
+  - CROP_FAILURE: Judge recebe contexto de perda total
+- **Schema**: `cropPatternStatus`, `cropPatternData`, `aiCropVerificationStatus`, `aiCropVerificationData` no `AgroData`
+- **Dashboard**: Coluna "Cultura" com status visual (Sem Cultivo, Anômalo, Atípico, OK) + verificação IA
+- **Dashboard**: Filtro "Cultura" (Com Problema, Sem Cultivo, Anômalo, Atípico, OK)
+- **Relatório**: Card de alerta crítico com métricas NDVI, hipóteses e recomendações quando NO_CROP ou ANOMALOUS
+
+#### Alterado
+
+- `ai-validation.service.ts`: Pipeline atualizado para incluir Verifier entre Curator e Judge
+- `process/route.ts`: Crop pattern analysis executado logo após fenologia, antes de cálculos pesados
+- `ai-validate/route.ts`: Re-análise de crop pattern em validação manual
+- `types.ts`: Novos tipos `CropVerification`, `VerifierAnalysis`, `CropPatternShortCircuit`
+- `CostReport`: Inclui custo do Verifier (campo `verifier`)
+- `AIValidationPanel.tsx`: Exibe alerta de cultura quando cropPatternStatus indica problema
+- `field-table.tsx`: Nova coluna "Cultura" com sort e badge visual
+- `fields/route.ts` (GET): Retorna `cropPatternStatus` e `aiCropVerificationStatus`
+
+---
+
 ## [0.0.31] - 2026-02-11
 
 ### Dashboard Avançado: Tabela Ordenável e Filtros Expandidos

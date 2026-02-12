@@ -98,6 +98,10 @@ export async function GET(request: NextRequest) {
             eosDate: true,
             sosDate: true,
             rawAreaData: true,       // processed server-side → fusedEosDate
+            // Crop pattern (algorithmic)
+            cropPatternStatus: true,
+            // Crop verification (AI Verifier)
+            aiCropVerificationStatus: true,
             // AI Validation fields
             aiValidationAgreement: true,
             aiValidationConfidence: true,
@@ -155,6 +159,10 @@ export async function GET(request: NextRequest) {
           eosDate: field.agroData.eosDate,
           sosDate: field.agroData.sosDate,
           fusedEosDate,
+          // Crop pattern (algorithmic)
+          cropPatternStatus: field.agroData.cropPatternStatus,
+          // Crop verification (AI Verifier)
+          aiCropVerificationStatus: field.agroData.aiCropVerificationStatus,
           // AI fields (lightweight, pre-processed)
           aiValidationAgreement: agreementStr, // Now correctly the agreement string
           aiValidationConfidence: field.agroData.aiValidationConfidence,

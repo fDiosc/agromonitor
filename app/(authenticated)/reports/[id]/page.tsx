@@ -1004,45 +1004,64 @@ export default function ReportPage() {
           </div>
         </div>
 
-        {/* Metric Cards */}
-        {/* Usa confiança da fusão EOS quando disponível, senão usa NDVI (default) */}
-        <MetricCards
-          areaHa={agroData?.areaHa}
-          volumeEstimatedKg={agroData?.volumeEstimatedKg}
-          historicalCorrelation={agroData?.historicalCorrelation}
-          confidenceScore={eosFusion ? eosFusion.confidence : agroData?.confidenceScore}
-          confidence={eosFusion ? (eosFusion.confidence >= 75 ? 'HIGH' : eosFusion.confidence >= 50 ? 'MEDIUM' : 'LOW') : agroData?.confidence}
-        />
+        {/* ============================================================ */}
+        {/* CROP ISSUE DETECTION — drives entire page layout              */}
+        {/* When crop identity is in question, EOS/GDD/Volume are invalid */}
+        {/* ============================================================ */}
+        {(() => {
+          const cropPattern = agroData?.cropPatternStatus
+          const cropVerif = agroData?.aiCropVerificationStatus
+          const hasCropIssue = cropPattern === 'NO_CROP' || cropPattern === 'ANOMALOUS' || cropPattern === 'ATYPICAL'
+            || (cropVerif && cropVerif !== 'CONFIRMED')
 
-        {/* Phenology Timeline - com ZARC e EOS Fusion integrados */}
-        <PhenologyTimeline
-          plantingDate={agroData?.plantingDate}
-          sosDate={agroData?.sosDate}
-          eosDate={eosFusion ? eosFusion.eos.toISOString() : agroData?.eosDate}
-          method={agroData?.phenologyMethod}
-          zarcInfo={zarcInfo}
-          eosFusion={eosFusion ? {
-            method: eosFusion.method,
-            confidence: eosFusion.confidence,
-            phenologicalStage: eosFusion.phenologicalStage,
-            explanation: eosFusion.explanation,
-            factors: eosFusion.factors,
-            projections: {
-              ndvi: {
-                date: eosFusion.projections.ndvi.date?.toISOString() || null,
-                confidence: eosFusion.projections.ndvi.confidence,
-                status: eosFusion.projections.ndvi.status
-              },
-              gdd: {
-                date: eosFusion.projections.gdd.date?.toISOString() || null,
-                confidence: eosFusion.projections.gdd.confidence,
-                status: eosFusion.projections.gdd.status
-              },
-              waterAdjustment: eosFusion.projections.waterAdjustment
-            },
-            warnings: eosFusion.warnings
-          } : null}
-        />
+          return (
+            <>
+              {/* CROP ALERT — always at the TOP when there is a crop issue */}
+              {hasCropIssue && agroData && (
+                <AIValidationPanel agroData={agroData} />
+              )}
+
+              {/* Metric Cards — suppress volume/correlation/confidence when crop issue */}
+              <MetricCards
+                areaHa={agroData?.areaHa}
+                volumeEstimatedKg={hasCropIssue ? null : agroData?.volumeEstimatedKg}
+                historicalCorrelation={hasCropIssue ? null : agroData?.historicalCorrelation}
+                confidenceScore={hasCropIssue ? null : (eosFusion ? eosFusion.confidence : agroData?.confidenceScore)}
+                confidence={hasCropIssue ? null : (eosFusion ? (eosFusion.confidence >= 75 ? 'HIGH' : eosFusion.confidence >= 50 ? 'MEDIUM' : 'LOW') : agroData?.confidence)}
+              />
+
+              {/* Phenology Timeline — suppress EOS/fusion data when crop issue */}
+              <PhenologyTimeline
+                plantingDate={agroData?.plantingDate}
+                sosDate={agroData?.sosDate}
+                eosDate={hasCropIssue ? null : (eosFusion ? eosFusion.eos.toISOString() : agroData?.eosDate)}
+                method={agroData?.phenologyMethod}
+                zarcInfo={zarcInfo}
+                eosFusion={hasCropIssue ? null : (eosFusion ? {
+                  method: eosFusion.method,
+                  confidence: eosFusion.confidence,
+                  phenologicalStage: eosFusion.phenologicalStage,
+                  explanation: eosFusion.explanation,
+                  factors: eosFusion.factors,
+                  projections: {
+                    ndvi: {
+                      date: eosFusion.projections.ndvi.date?.toISOString() || null,
+                      confidence: eosFusion.projections.ndvi.confidence,
+                      status: eosFusion.projections.ndvi.status
+                    },
+                    gdd: {
+                      date: eosFusion.projections.gdd.date?.toISOString() || null,
+                      confidence: eosFusion.projections.gdd.confidence,
+                      status: eosFusion.projections.gdd.status
+                    },
+                    waterAdjustment: eosFusion.projections.waterAdjustment
+                  },
+                  warnings: eosFusion.warnings
+                } : null)}
+              />
+            </>
+          )
+        })()}
 
         {/* NDVI Chart */}
         {chartData.length > 0 && (
@@ -1308,54 +1327,70 @@ export default function ReportPage() {
           </Card>
         )}
 
-        {/* Tabs de Dados */}
-        <AnalysisTabs
-          featureFlags={featureFlags}
-          precipitationData={precipitationData}
-          harvestWindow={harvestWindow}
-          harvestAdjustment={harvestAdjustment}
-          waterBalanceData={waterBalanceData}
-          eosAdjustment={eosAdjustment}
-          thermalData={thermalData}
-          climateEnvelopeData={climateEnvelopeData}
-          soilData={soilData}
-          satelliteSchedule={satelliteSchedule}
-          fieldId={fieldId}
-          cropType={field?.cropType || 'SOJA'}
-          plantingDate={agroData?.plantingDate}
-          sosDate={agroData?.sosDate}
-        />
+        {/* Tabs de Dados — suppress GDD/thermal when crop issue (data is not meaningful) */}
+        {(() => {
+          const _cp = agroData?.cropPatternStatus
+          const _cv = agroData?.aiCropVerificationStatus
+          const _hasCropIssue = _cp === 'NO_CROP' || _cp === 'ANOMALOUS' || _cp === 'ATYPICAL'
+            || (_cv && _cv !== 'CONFIRMED')
+          return (
+            <AnalysisTabs
+              featureFlags={featureFlags}
+              precipitationData={precipitationData}
+              harvestWindow={_hasCropIssue ? null : harvestWindow}
+              harvestAdjustment={_hasCropIssue ? null : harvestAdjustment}
+              waterBalanceData={waterBalanceData}
+              eosAdjustment={_hasCropIssue ? null : eosAdjustment}
+              thermalData={_hasCropIssue ? null : thermalData}
+              climateEnvelopeData={climateEnvelopeData}
+              soilData={soilData}
+              satelliteSchedule={satelliteSchedule}
+              fieldId={fieldId}
+              cropType={field?.cropType || 'SOJA'}
+              plantingDate={agroData?.plantingDate}
+              sosDate={agroData?.sosDate}
+            />
+          )
+        })()}
 
-        {/* AI Validation Section */}
-        {featureFlags?.enableAIValidation && featureFlags?.showAIValidation !== false && agroData && (
-          <div className="space-y-4">
-            {/* Show panel if validation data exists */}
-            {agroData.aiValidationResult ? (
-              <div className="space-y-3">
-                <AIValidationPanel agroData={agroData} />
-                {/* Re-run button below the panel */}
-                <div className="flex items-center gap-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleRunAIValidation}
-                    disabled={isRunningAIValidation}
-                    className="text-xs text-violet-600 border-violet-300 hover:bg-violet-50"
-                  >
-                    {isRunningAIValidation ? (
-                      <><Loader2 size={14} className="mr-1.5 animate-spin" />Revalidando...</>
-                    ) : (
-                      <><RefreshCw size={14} className="mr-1.5" />Revalidar com IA</>
+        {/* AI Validation Section — crop alert already shown at top, so only show Judge panel here for NON-crop-issue fields */}
+        {(() => {
+          const _cp2 = agroData?.cropPatternStatus
+          const _cv2 = agroData?.aiCropVerificationStatus
+          const _hasCropIssue2 = _cp2 === 'NO_CROP' || _cp2 === 'ANOMALOUS' || _cp2 === 'ATYPICAL'
+            || (_cv2 && _cv2 !== 'CONFIRMED')
+          
+          // If crop issue exists, the alert is already at the top — don't show AI validation section
+          if (_hasCropIssue2) return null
+
+          return featureFlags?.enableAIValidation && featureFlags?.showAIValidation !== false && agroData ? (
+            <div className="space-y-4">
+              {agroData.aiValidationResult ? (
+                <div className="space-y-3">
+                  <AIValidationPanel agroData={agroData} />
+                  {/* Re-run button below the panel */}
+                  <div className="flex items-center gap-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRunAIValidation}
+                      disabled={isRunningAIValidation}
+                      className="text-xs text-violet-600 border-violet-300 hover:bg-violet-50"
+                    >
+                      {isRunningAIValidation ? (
+                        <><Loader2 size={14} className="mr-1.5 animate-spin" />Revalidando...</>
+                      ) : (
+                        <><RefreshCw size={14} className="mr-1.5" />Revalidar com IA</>
+                      )}
+                    </Button>
+                    {agroData.aiValidationDate && (
+                      <span className="text-xs text-slate-400">
+                        Última validação: {new Date(agroData.aiValidationDate).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     )}
-                  </Button>
-                  {agroData.aiValidationDate && (
-                    <span className="text-xs text-slate-400">
-                      Última validação: {new Date(agroData.aiValidationDate).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  )}
+                  </div>
                 </div>
-              </div>
-            ) : (
+              ) : (
               /* Trigger button when no validation data yet - WOW design */
               <div className="relative group">
                 {/* Animated gradient border glow */}
@@ -1479,7 +1514,8 @@ export default function ReportPage() {
               </div>
             )}
           </div>
-        )}
+          ) : null
+        })()}
 
         {/* Template Selector */}
         <div>

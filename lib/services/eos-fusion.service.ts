@@ -291,11 +291,45 @@ export function calculateFusedEos(input: EosFusionInput): EosFusionResult {
   }
   // Caso 5: Apenas GDD disponível
   else if (input.eosGdd) {
-    eos = new Date(input.eosGdd.getTime() + waterAdjustment * 24 * 60 * 60 * 1000)
-    confidence = GDD_CONFIDENCE_MAP[input.gddConfidence as unknown as string] || 70
-    method = waterAdjustment !== 0 ? 'GDD_ADJUSTED' : 'GDD'
-    explanation = 'Projeção baseada em soma térmica (GDD).'
-    factors.push(`Progresso GDD: ${(gddProgress * 100).toFixed(0)}%`)
+    const gddEosWithWater = new Date(input.eosGdd.getTime() + waterAdjustment * 24 * 60 * 60 * 1000)
+    const gddEosInPast = gddEosWithWater < today
+    const ndviStillHigh = input.currentNdvi >= NDVI_THRESHOLDS.VEGETATIVE_MIN
+    const ndviStillGrowing = input.ndviDeclineRate <= 0 // Taxa negativa ou zero = sem declínio
+    const ndviNearPeak = input.peakNdvi > 0 && (input.currentNdvi / input.peakNdvi) > 0.90
+    
+    // Caso 5a: GDD EOS no passado MAS NDVI contradiz (planta ainda verde/crescendo)
+    // Isso indica que a data de plantio usada para GDD está incorreta
+    // ou o ciclo real da cultura é diferente do esperado
+    if (gddEosInPast && ndviStillHigh && (ndviStillGrowing || ndviNearPeak)) {
+      // NÃO usar a data GDD — é claramente incorreta
+      // Projetar a partir da tendência atual do NDVI
+      // Estimar: planta está no pico ou pré-pico, faltam ~40-60 dias até colheita
+      const estimatedDaysToEos = ndviStillGrowing ? 60 : 45
+      eos = new Date(today.getTime() + estimatedDaysToEos * 24 * 60 * 60 * 1000)
+      confidence = 35 // Confiança BAIXA - dados inconsistentes
+      method = 'GDD_ADJUSTED'
+      explanation = 'GDD indica maturação no passado, mas NDVI mostra planta ainda em crescimento ativo. Projeção GDD descartada — possível data de plantio incorreta ou ciclo diferente.'
+      factors.push(`⚠️ GDD: ${(gddProgress * 100).toFixed(0)}% (${formatDate(input.eosGdd)}) — INCONSISTENTE`)
+      factors.push(`NDVI atual: ${(input.currentNdvi * 100).toFixed(0)}% (pico: ${(input.peakNdvi * 100).toFixed(0)}%) — planta verde`)
+      factors.push(`Taxa NDVI: ${input.ndviDeclineRate > 0 ? 'declínio' : 'crescimento'} (${input.ndviDeclineRate.toFixed(2)}%/pt)`)
+      factors.push(`Estimativa conservadora: ~${estimatedDaysToEos} dias a partir de hoje`)
+      warnings.push(`GDD EOS (${formatDate(input.eosGdd)}) descartado: NDVI a ${(input.currentNdvi * 100).toFixed(0)}% contradiz maturação`)
+      warnings.push('Provável: data de plantio ausente/incorreta ou segundo ciclo não detectado')
+    }
+    // Caso 5b: GDD EOS normal (futuro ou passado com NDVI em declínio)
+    else {
+      eos = gddEosWithWater
+      confidence = GDD_CONFIDENCE_MAP[input.gddConfidence as unknown as string] || 70
+      method = waterAdjustment !== 0 ? 'GDD_ADJUSTED' : 'GDD'
+      explanation = 'Projeção baseada em soma térmica (GDD).'
+      factors.push(`Progresso GDD: ${(gddProgress * 100).toFixed(0)}%`)
+      
+      // Se GDD está no passado mas sem contradição forte, avisar mas manter
+      if (gddEosInPast) {
+        confidence = Math.min(confidence, 60) // Limitar confiança
+        warnings.push(`GDD EOS (${formatDate(input.eosGdd)}) no passado — confiança reduzida`)
+      }
+    }
   }
   // Caso 6: Nenhum dado disponível
   else {
@@ -360,13 +394,39 @@ function determinePhenologicalStage(
   ndviDecline: number,
   declineRate: number
 ): EosFusionResult['phenologicalStage'] {
-  // Maturidade: NDVI baixo ou GDD ultrapassado
-  if (currentNdvi < NDVI_THRESHOLDS.MATURITY || gddProgress > 1.1) {
+  // Maturidade: NDVI DEVE estar baixo para confirmar maturidade
+  // GDD sozinho não é suficiente se NDVI contradiz (planta ainda verde)
+  if (currentNdvi < NDVI_THRESHOLDS.MATURITY) {
     return 'MATURITY'
   }
   
-  // Senescência: NDVI em declínio significativo ou GDD > 90%
-  if (ndviDecline > 0.15 || gddProgress > GDD_THRESHOLDS.SENESCENCE_START) {
+  // Se GDD diz maturidade mas NDVI está alto e sem declínio,
+  // há inconsistência — GDD provavelmente foi calculado com data de plantio incorreta
+  // Priorizar o que a planta realmente mostra (NDVI)
+  if (gddProgress > 1.1 && currentNdvi >= NDVI_THRESHOLDS.VEGETATIVE_MIN && ndviDecline < 0.05) {
+    // NDVI alto e sem declínio significativo = planta claramente ainda em crescimento
+    // GDD inconsistente — provavelmente data de plantio errada
+    return 'VEGETATIVE'
+  }
+  
+  if (gddProgress > 1.1 && currentNdvi >= NDVI_THRESHOLDS.SENESCENCE_START) {
+    // NDVI acima de senescência mas GDD altíssimo = possível fase reprodutiva tardia
+    return 'REPRODUCTIVE'
+  }
+  
+  if (gddProgress > 1.1) {
+    // NDVI já começou a cair, GDD confirma
+    return 'MATURITY'
+  }
+  
+  // Senescência: NDVI em declínio significativo E GDD suporta
+  // Não marcar senescência apenas por GDD se NDVI não confirma
+  if (ndviDecline > 0.15 && gddProgress > GDD_THRESHOLDS.GRAIN_FILLING_START) {
+    return 'SENESCENCE'
+  }
+  
+  // Senescência por GDD alto, mas só se NDVI não está claramente em crescimento
+  if (gddProgress > GDD_THRESHOLDS.SENESCENCE_START && ndviDecline > 0.05) {
     return 'SENESCENCE'
   }
   

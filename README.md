@@ -24,6 +24,8 @@ O **MERX AGRO Monitor** é uma plataforma multi-tenant que transforma dados de s
 - **Templates de Análise** - Crédito, Logística, Matriz de Risco
 - **Validação Visual IA (v0.0.29)** - Agentes Curador + Juiz validam imagens de satélite com Gemini multimodal (6 fontes de dados)
 - **Fusão EOS Corrigida (v0.0.30)** - Single source of truth: data canônica calculada no servidor
+- **Pipeline de Criticidade de Cultura (v0.0.32)** - Validação algorítmica + IA Verificadora da cultura declarada (8 culturas, 3 categorias)
+- **Sanidade EOS + ATYPICAL (v0.0.33)** - NDVI prevalece sobre GDD em contradições; classificação ATYPICAL para ciclos indefinidos; supressão automática de resultados IA quando cultura é duvidosa
 - **Feature Flags** - Configuração de módulos por workspace
 
 ---
@@ -84,10 +86,11 @@ GEMINI_API_KEY="sua-chave-gemini"
            ┌───────────┬───────┼───────┬───────────┐
            ▼           ▼       ▼       ▼           ▼
     ┌───────────┐ ┌─────────┐ ┌─────────┐ ┌────────────┐ ┌──────────┐
-    │  Prisma   │ │Merx API │ │Gemini AI│ │Sentinel Hub│ │AI Agents │
-    │PostgreSQL │ │Satellite│ │Analysis │ │ Process API│ │Curator+  │
-    │  (Neon)   │ │ + Clima │ │Templates│ │  (Images)  │ │  Judge   │
-    └───────────┘ └─────────┘ └─────────┘ └────────────┘ └──────────┘
+    │  Prisma   │ │Merx API │ │Gemini AI│ │Sentinel Hub│ │AI Agents    │
+    │PostgreSQL │ │Satellite│ │Analysis │ │ Process API│ │Curator+     │
+    │  (Neon)   │ │ + Clima │ │Templates│ │  (Images)  │ │Verifier+    │
+    │           │ │         │ │         │ │            │ │Judge        │
+    └───────────┘ └─────────┘ └─────────┘ └────────────┘ └─────────────┘
 ```
 
 ### Stack Tecnológica
@@ -101,7 +104,8 @@ GEMINI_API_KEY="sua-chave-gemini"
 | ORM | Prisma |
 | Database | PostgreSQL (Neon) |
 | AI (Templates) | Google Gemini 3 Flash Preview |
-| AI (Visual) | Gemini multimodal (Curator + Judge agents) |
+| AI (Visual) | Gemini multimodal (Curator + Verifier + Judge agents) |
+| AI (Crop Verifier) | Gemini Flash Lite (verificação visual de cultura) |
 | Satellite Images | Sentinel Hub Process API (Copernicus) |
 | APIs | Merx API (satellite/climate data) |
 
@@ -150,14 +154,17 @@ merx-agro-mvp/
 │   ├── prisma.ts               # Cliente Prisma
 │   ├── agents/                 # Agentes de IA (Visual Validation)
 │   │   ├── curator.ts          # Agente Curador (seleção de imagens)
+│   │   ├── verifier.ts         # Agente Verificador (confirmação visual de cultura)
 │   │   ├── judge.ts            # Agente Juiz (validação fenológica)
 │   │   ├── curator-prompt.ts   # Prompt do Curador
+│   │   ├── verifier-prompt.ts  # Prompt do Verificador
 │   │   ├── judge-prompt.ts     # Prompt do Juiz
 │   │   ├── types.ts            # Tipos compartilhados dos agentes
 │   │   └── evalscripts/        # Scripts Sentinel Hub (NDVI, True Color, Radar)
 │   └── services/               # Serviços de negócio
-│       ├── ai-validation.service.ts     # Orquestrador da validação visual IA
-│       ├── eos-fusion.service.ts        # Fusão EOS (NDVI + GDD + Hídrico)
+│       ├── ai-validation.service.ts     # Orquestrador da validação visual IA (Curator→Verifier→Judge)
+│       ├── crop-pattern.service.ts      # Análise algorítmica de padrão de cultura (v0.0.32)
+│       ├── eos-fusion.service.ts        # Fusão EOS (NDVI + GDD + Hídrico, sanity check v0.0.33)
 │       ├── thermal.service.ts           # Soma térmica (GDD)
 │       ├── water-balance.service.ts     # Balanço hídrico
 │       ├── climate-envelope.service.ts  # Envelope climático histórico
@@ -179,11 +186,11 @@ merx-agro-mvp/
 
 | Documento | Descrição | Status |
 |-----------|-----------|--------|
-| [README.md](./README.md) | Este documento - visão geral | ✅ Atualizado (11/02) |
-| [CHANGELOG.md](./CHANGELOG.md) | Histórico de mudanças | ✅ Atualizado (11/02) |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Arquitetura detalhada | ✅ Atualizado (11/02) |
-| [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md) | **Metodologia V2** - Fusão EOS, GDD, Envelope Climático, IA Visual | ✅ Atualizado (11/02) |
-| [METHODOLOGY.md](./METHODOLOGY.md) | Metodologias técnicas | ✅ Atualizado (11/02) |
+| [README.md](./README.md) | Este documento - visão geral | ✅ Atualizado (12/02) |
+| [CHANGELOG.md](./CHANGELOG.md) | Histórico de mudanças | ✅ Atualizado (12/02) |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Arquitetura detalhada | ✅ Atualizado (12/02) |
+| [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md) | **Metodologia V2** (v4.1) - Fusão EOS, GDD, Crop Criticality, IA Visual | ✅ Atualizado (12/02) |
+| [METHODOLOGY.md](./METHODOLOGY.md) | Metodologias técnicas | ✅ Atualizado (12/02) |
 | [DIAGNOSTICOLOG.md](./DIAGNOSTICOLOG.md) | Especificação módulo logístico | ✅ Atualizado |
 | [REFATORACAO1.md](./REFATORACAO1.md) | Plano de multi-tenancy e auth | ✅ Concluído |
 
@@ -191,8 +198,8 @@ merx-agro-mvp/
 
 | Documento | Descrição | Status |
 |-----------|-----------|--------|
-| [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md) | Metodologia V2 - Fusão EOS científica | ✅ Atualizado (11/02) |
-| [docs/PLAN-AI-VISUAL-VALIDATION.md](./docs/PLAN-AI-VISUAL-VALIDATION.md) | Plano de validação visual IA (Curador + Juiz) | ✅ Concluído |
+| [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md) | Metodologia V2 (v4.1) - Fusão EOS, Crop Criticality, IA 3-Agent | ✅ Atualizado (12/02) |
+| [docs/PLAN-AI-VISUAL-VALIDATION.md](./docs/PLAN-AI-VISUAL-VALIDATION.md) | Plano de validação visual IA (Curador + Verificador + Juiz) | ✅ Concluído |
 | [docs/PLAN-HYBRID-ANALYSIS.md](./docs/PLAN-HYBRID-ANALYSIS.md) | Plano de análise híbrida | ✅ Concluído |
 | [docs/PLAN-REPROCESS-ANALYSIS.md](./docs/PLAN-REPROCESS-ANALYSIS.md) | Plano de reprocessamento | ✅ Concluído |
 | [docs/PLAN-ZARC-ALIGNMENT.md](./docs/PLAN-ZARC-ALIGNMENT.md) | Alinhamento ZARC | ✅ Concluído |

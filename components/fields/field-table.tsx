@@ -28,6 +28,10 @@ export interface Field {
     eosDate: string | null
     sosDate: string | null
     fusedEosDate: string | null
+    // Crop pattern (algorithmic)
+    cropPatternStatus: string | null  // NO_CROP | ANOMALOUS | ATYPICAL | TYPICAL
+    // Crop verification (AI Verifier)
+    aiCropVerificationStatus: string | null  // CONFIRMED | SUSPICIOUS | MISMATCH | NO_CROP | CROP_FAILURE
     // AI Validation (pre-processed server-side)
     aiValidationAgreement: string | null
     aiValidationConfidence: number | null
@@ -66,11 +70,13 @@ interface FieldTableProps {
 type SortKey =
   | 'name' | 'status' | 'area' | 'volume'
   | 'emergence' | 'harvest' | 'confidence'
+  | 'cropPattern'
   | 'aiAgreement' | 'aiEos' | 'aiReady' | 'aiConfidence'
 
 type SortDir = 'asc' | 'desc'
 
 const AGREEMENT_ORDER: Record<string, number> = { REJECTED: 0, QUESTIONED: 1, CONFIRMED: 2 }
+const CROP_PATTERN_ORDER: Record<string, number> = { NO_CROP: 0, ANOMALOUS: 1, ATYPICAL: 2, TYPICAL: 3 }
 
 function getSortValue(field: Field, key: SortKey): number | string | null {
   switch (key) {
@@ -87,6 +93,7 @@ function getSortValue(field: Field, key: SortKey): number | string | null {
       return eos ? new Date(eos).getTime() : null
     }
     case 'confidence':   return field.agroData?.confidenceScore ?? null
+    case 'cropPattern':  return CROP_PATTERN_ORDER[field.agroData?.cropPatternStatus ?? ''] ?? null
     case 'aiAgreement':  return AGREEMENT_ORDER[field.agroData?.aiValidationAgreement ?? ''] ?? null
     case 'aiEos': {
       const d = field.agroData?.aiEosAdjustedDate
@@ -213,6 +220,7 @@ export function FieldTable({ fields, onDelete, onReprocess, isDeleting, isReproc
               <TH k="emergence">Emerg.</TH>
               <TH k="harvest" className="text-blue-500">Colheita</TH>
               <TH k="confidence">Conf.</TH>
+              <TH k="cropPattern">Cultura</TH>
               <TH k="aiAgreement">IA</TH>
               <TH k="aiEos">EOS IA</TH>
               <TH k="aiReady">Pronta</TH>
@@ -233,10 +241,15 @@ export function FieldTable({ fields, onDelete, onReprocess, isDeleting, isReproc
               const eos = bestEos(field.agroData)
               const sos = field.agroData?.sosDate
               const confScore = field.agroData?.confidenceScore
-              const aiAgreement = field.agroData?.aiValidationAgreement
-              const aiConf = field.agroData?.aiValidationConfidence
-              const aiEos = field.agroData?.aiEosAdjustedDate
-              const ready = field.agroData?.harvestReady
+              const cropPattern = field.agroData?.cropPatternStatus
+              const cropVerif = field.agroData?.aiCropVerificationStatus
+              // When there's a crop issue, Judge AI results are not meaningful — suppress them
+              const hasCropIssue = cropPattern === 'NO_CROP' || cropPattern === 'ANOMALOUS' || cropPattern === 'ATYPICAL'
+                || (cropVerif && cropVerif !== 'CONFIRMED')
+              const aiAgreement = hasCropIssue ? null : field.agroData?.aiValidationAgreement
+              const aiConf = hasCropIssue ? null : field.agroData?.aiValidationConfidence
+              const aiEos = hasCropIssue ? null : field.agroData?.aiEosAdjustedDate
+              const ready = hasCropIssue ? null : field.agroData?.harvestReady
               const agCfg = aiAgreement ? agreementConfig[aiAgreement] : null
 
               return (
@@ -302,6 +315,37 @@ export function FieldTable({ fields, onDelete, onReprocess, isDeleting, isReproc
                     <span className={`font-bold text-[12px] ${confColor(confScore)}`}>
                       {confScore != null ? `${confScore}%` : '—'}
                     </span>
+                  </td>
+
+                  {/* CULTURA (crop pattern) */}
+                  <td className="px-3 py-3">
+                    {cropPattern === 'NO_CROP' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border bg-red-50 text-red-700 border-red-300" title="Sem cultivo detectado">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500" />Sem Cultivo
+                      </span>
+                    ) : cropPattern === 'ANOMALOUS' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border bg-orange-50 text-orange-700 border-orange-300" title="Curva não se assemelha à cultura declarada">
+                        <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />Anômalo
+                      </span>
+                    ) : cropPattern === 'ATYPICAL' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border bg-amber-50 text-amber-700 border-amber-300" title="Cultura com desvios">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />Atípico
+                      </span>
+                    ) : cropPattern === 'TYPICAL' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-300">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />OK
+                      </span>
+                    ) : (
+                      <span className="text-slate-300 text-[10px]">—</span>
+                    )}
+                    {cropVerif && cropVerif !== 'CONFIRMED' && (
+                      <span className="block text-[8px] font-semibold mt-0.5" title={`Verificação IA: ${cropVerif}`}>
+                        {cropVerif === 'NO_CROP' && <span className="text-red-600">IA: Sem cultivo</span>}
+                        {cropVerif === 'MISMATCH' && <span className="text-red-600">IA: Divergente</span>}
+                        {cropVerif === 'CROP_FAILURE' && <span className="text-orange-600">IA: Quebra</span>}
+                        {cropVerif === 'SUSPICIOUS' && <span className="text-amber-600">IA: Suspeito</span>}
+                      </span>
+                    )}
                   </td>
 
                   {/* IA AGREEMENT */}

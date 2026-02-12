@@ -284,15 +284,23 @@ export function PhenologyTimeline({
         </h4>
         
         <div className="mt-2 flex items-center gap-2 flex-wrap">
-          <p className="text-[10px] text-amber-500 font-bold uppercase">
-            Status: {method === 'ALGORITHM' ? 'DETECÇÃO REAL' : 'PROJEÇÃO CICLO'}
-          </p>
-          
-          {/* Estágio fenológico */}
-          {eosFusion?.phenologicalStage && (
-            <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-200 text-amber-700 font-medium">
-              {getStageLabel(eosFusion.phenologicalStage)}
-            </span>
+          {eosDate ? (
+            <>
+              <p className="text-[10px] text-amber-500 font-bold uppercase">
+                Status: {method === 'ALGORITHM' ? 'DETECÇÃO REAL' : 'PROJEÇÃO CICLO'}
+              </p>
+              
+              {/* Estágio fenológico */}
+              {eosFusion?.phenologicalStage && (
+                <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-200 text-amber-700 font-medium">
+                  {getStageLabel(eosFusion.phenologicalStage)}
+                </span>
+              )}
+            </>
+          ) : (
+            <p className="text-[10px] text-amber-400 font-bold uppercase">
+              Sem projeção disponível
+            </p>
           )}
         </div>
       </div>

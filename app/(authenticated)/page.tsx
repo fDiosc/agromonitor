@@ -24,6 +24,7 @@ export default function DashboardPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [logisticsUnitFilter, setLogisticsUnitFilter] = useState<string>('all')
   const [assignmentTypeFilter, setAssignmentTypeFilter] = useState<string>('all')
+  const [cropPatternFilter, setCropPatternFilter] = useState<string>('all')
   const [aiFilter, setAiFilter] = useState<string>('all')
   const [aiAgreementFilter, setAiAgreementFilter] = useState<string>('all')
   const [confidenceFilter, setConfidenceFilter] = useState<string>('all')
@@ -111,6 +112,16 @@ export default function DashboardPage() {
         }
       }
 
+      // ── Crop pattern filter ──
+      if (cropPatternFilter !== 'all') {
+        const cp = field.agroData?.cropPatternStatus
+        if (cropPatternFilter === 'problem' && (cp === 'TYPICAL' || !cp)) return false
+        if (cropPatternFilter === 'NO_CROP' && cp !== 'NO_CROP') return false
+        if (cropPatternFilter === 'ANOMALOUS' && cp !== 'ANOMALOUS') return false
+        if (cropPatternFilter === 'ATYPICAL' && cp !== 'ATYPICAL') return false
+        if (cropPatternFilter === 'TYPICAL' && cp !== 'TYPICAL') return false
+      }
+
       // ── AI filters ──
       const hasAi = !!field.agroData?.aiValidationAgreement
       if (aiFilter === 'with_ai' && !hasAi) return false
@@ -147,7 +158,7 @@ export default function DashboardPage() {
 
       return true
     })
-  }, [fields, statusFilter, logisticsUnitFilter, assignmentTypeFilter, aiFilter, aiAgreementFilter, confidenceFilter, harvestWindowFilter])
+  }, [fields, statusFilter, logisticsUnitFilter, assignmentTypeFilter, cropPatternFilter, aiFilter, aiAgreementFilter, confidenceFilter, harvestWindowFilter])
 
   const handleDelete = async (id: string) => {
     if (!confirm('Tem certeza que deseja excluir este talhão?')) return
@@ -189,6 +200,7 @@ export default function DashboardPage() {
     setStatusFilter('all')
     setLogisticsUnitFilter('all')
     setAssignmentTypeFilter('all')
+    setCropPatternFilter('all')
     setAiFilter('all')
     setAiAgreementFilter('all')
     setConfidenceFilter('all')
@@ -196,7 +208,7 @@ export default function DashboardPage() {
   }
 
   const hasActiveFilters = statusFilter !== 'all' || logisticsUnitFilter !== 'all' || assignmentTypeFilter !== 'all'
-    || aiFilter !== 'all' || aiAgreementFilter !== 'all' || confidenceFilter !== 'all' || harvestWindowFilter !== 'all'
+    || cropPatternFilter !== 'all' || aiFilter !== 'all' || aiAgreementFilter !== 'all' || confidenceFilter !== 'all' || harvestWindowFilter !== 'all'
 
   return (
     <div className="p-8">
@@ -324,6 +336,37 @@ export default function DashboardPage() {
                 <button key={opt.value} onClick={() => setConfidenceFilter(opt.value)}
                   className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
                     confidenceFilter === opt.value ? 'bg-blue-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Cultura */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Cultura:
+            </span>
+            <div className="flex gap-1">
+              {[
+                { value: 'all', label: 'Todas' },
+                { value: 'problem', label: 'Com Problema' },
+                { value: 'NO_CROP', label: 'Sem Cultivo' },
+                { value: 'ANOMALOUS', label: 'Anômalo' },
+                { value: 'ATYPICAL', label: 'Atípico' },
+                { value: 'TYPICAL', label: 'OK' },
+              ].map(opt => (
+                <button key={opt.value} onClick={() => setCropPatternFilter(opt.value)}
+                  className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                    cropPatternFilter === opt.value
+                      ? opt.value === 'NO_CROP' || opt.value === 'problem' ? 'bg-red-600 text-white'
+                        : opt.value === 'ANOMALOUS' ? 'bg-orange-600 text-white'
+                        : opt.value === 'ATYPICAL' ? 'bg-amber-600 text-white'
+                        : opt.value === 'TYPICAL' ? 'bg-emerald-600 text-white'
+                        : 'bg-slate-600 text-white'
+                      : 'bg-white border text-slate-600 hover:bg-slate-100'
                   }`}
                 >
                   {opt.label}

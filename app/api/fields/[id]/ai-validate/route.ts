@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { getFeatureFlags } from '@/lib/services/feature-flags.service'
 import { runAIValidation, type AIValidationResult } from '@/lib/services/ai-validation.service'
+import { analyzeCropPattern } from '@/lib/services/crop-pattern.service'
 
 interface RouteParams {
   params: { id: string }
@@ -138,6 +139,21 @@ export async function POST(
 
     console.log(`[AI-VALIDATE] Manual trigger for field ${params.id}, EOS: ${bestEosDate} (raw: ${field.agroData.eosDate?.toISOString().split('T')[0]})`)
 
+    // Run crop pattern analysis from stored data or re-analyze
+    let cropPatternResult = undefined
+    if (field.agroData.rawNdviData) {
+      try {
+        const ndviData = JSON.parse(field.agroData.rawNdviData)
+        cropPatternResult = analyzeCropPattern(
+          ndviData,
+          field.cropType,
+          field.agroData.sosDate?.toISOString().split('T')[0] || null,
+          field.agroData.eosDate?.toISOString().split('T')[0] || null
+        )
+        console.log(`[AI-VALIDATE] Crop pattern: ${cropPatternResult.status} (${cropPatternResult.cropCategory})`)
+      } catch { /* ignore, will run without crop pattern context */ }
+    }
+
     // Executar validação
     const result = await runAIValidation({
       fieldId: params.id,
@@ -159,6 +175,7 @@ export async function POST(
       precipData: precipJudgeData,
       zarcData,
       fusionMetrics: fusionMetricsData,
+      cropPatternResult,
       curatorModel: featureFlags.aiCuratorModel
     })
 
@@ -181,6 +198,21 @@ export async function POST(
         aiVisualAlerts: JSON.stringify(result.visualAlerts),
         aiCurationReport: JSON.stringify(result.curationReport),
         aiCostReport: JSON.stringify(result.costReport),
+        // Crop verification (from Verifier agent, if called)
+        ...(result.cropVerification ? {
+          aiCropVerificationStatus: result.cropVerification.status,
+          aiCropVerificationData: JSON.stringify(result.cropVerification),
+        } : {}),
+        // Crop pattern (update if re-analyzed)
+        ...(cropPatternResult ? {
+          cropPatternStatus: cropPatternResult.status,
+          cropPatternData: JSON.stringify({
+            metrics: cropPatternResult.metrics,
+            hypotheses: cropPatternResult.hypotheses,
+            reason: cropPatternResult.reason,
+            cropCategory: cropPatternResult.cropCategory,
+          }),
+        } : {}),
         updatedAt: new Date()
       }
     })

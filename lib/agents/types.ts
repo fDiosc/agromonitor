@@ -1,6 +1,6 @@
 /**
  * AI Visual Validation - Shared Types
- * Types for the Curator + Judge agent pipeline
+ * Types for the Curator + Verifier + Judge agent pipeline
  * Adapted from POC Image Analysis lib/types.ts
  */
 
@@ -99,6 +99,7 @@ export interface AgentCostReport {
 
 export interface CostReport {
   curator: AgentCostReport
+  verifier?: AgentCostReport
   judge: AgentCostReport
   totalInputTokens: number
   totalOutputTokens: number
@@ -107,6 +108,7 @@ export interface CostReport {
     fetchMs: number
     timeseriesMs: number
     curatorMs: number
+    verifierMs?: number
     judgeMs: number
     totalMs: number
   }
@@ -153,4 +155,49 @@ export interface JudgeAnalysis {
   riskAssessment: RiskAssessment
   recommendations: string[]
   confidence: number // 0-100
+}
+
+// ==================== Crop Verification Types (Verifier Agent) ====================
+
+export type CropVerificationStatus =
+  | 'CONFIRMED'     // Declared crop is visually present
+  | 'SUSPICIOUS'    // Might be the crop but with issues
+  | 'MISMATCH'      // Clearly a different crop or land use
+  | 'NO_CROP'       // No evidence of cultivation
+  | 'CROP_FAILURE'  // Crop was planted but failed (total loss)
+
+export interface CropVerification {
+  status: CropVerificationStatus
+  declaredCrop: string
+  cropCategory: 'ANNUAL' | 'SEMI_PERENNIAL' | 'PERENNIAL'
+  visualAssessment: string
+  alternativeHypotheses: string[]
+  confidenceInDeclaredCrop: number // 0-100
+  evidence: string
+}
+
+export interface VerifierAnalysis {
+  cropVerification: CropVerification
+}
+
+// ==================== Pipeline Short-Circuit Types ====================
+
+/**
+ * When crop pattern or verifier determines NO_CROP/MISMATCH/CROP_FAILURE,
+ * this result is returned instead of a full AIValidationResult.
+ * No EOS, GDD, or other calculations should be performed.
+ */
+export interface CropPatternShortCircuit {
+  shortCircuited: true
+  cropPatternStatus: 'NO_CROP' | 'ANOMALOUS' | 'ATYPICAL'
+  cropVerificationStatus?: CropVerificationStatus
+  cropVerification?: CropVerification
+  reason: string
+  hypotheses: string[]
+  metrics: {
+    peakNdvi: number
+    amplitude: number
+    meanNdvi: number
+    dataPoints: number
+  }
 }

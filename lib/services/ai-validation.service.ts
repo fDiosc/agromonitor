@@ -6,6 +6,7 @@
 
 import { processImage } from './sentinel1.service'
 import { runCurator, type CuratorInput } from '@/lib/agents/curator'
+import { runVerifier, type VerifierInput } from '@/lib/agents/verifier'
 import { runJudge, type JudgeInput } from '@/lib/agents/judge'
 import { calculateCost, logCostReport, JUDGE_MODEL } from './ai-pricing.service'
 import type { JudgePromptParams } from '@/lib/agents/judge-prompt'
@@ -21,7 +22,10 @@ import type {
   RiskAssessment,
   ImageType,
   SatelliteCollection,
+  CropVerification,
+  AgentCostReport,
 } from '@/lib/agents/types'
+import type { CropPatternResult } from './crop-pattern.service'
 import {
   EVALSCRIPT_TRUE_COLOR,
   EVALSCRIPT_NDVI,
@@ -58,6 +62,9 @@ export interface AIValidationInput {
   zarcData?: JudgePromptParams['zarcData']
   fusionMetrics?: JudgePromptParams['fusionMetrics']
 
+  // Crop pattern analysis (from crop-pattern.service)
+  cropPatternResult?: CropPatternResult
+
   // Config
   curatorModel: string
 }
@@ -86,6 +93,13 @@ export interface AIValidationResult {
 
   // Evidence images (thumbnails base64 for UI — top 4 curated)
   evidenceImages: { date: string; type: string; base64: string }[]
+
+  // Crop verification (from Verifier agent, if called)
+  cropVerification?: CropVerification
+
+  // Short-circuited flag: true if Verifier determined NO_CROP/MISMATCH
+  // When true, Judge was NOT called and EOS data should NOT be generated
+  shortCircuited?: boolean
 }
 
 // ==================== Image Fetching ====================
@@ -320,7 +334,126 @@ export async function runAIValidation(input: AIValidationInput): Promise<AIValid
 
   console.log(`[AI-VALIDATION] Curator: ${curatorOutput.curatedImages.length}/${images.length} images curated`)
 
-  // 4. Run Judge
+  // 3.5. Run Verifier (only if crop pattern is ANOMALOUS or ATYPICAL)
+  let verifierMs = 0
+  let verifierCost: AgentCostReport | undefined
+  let cropVerification: CropVerification | undefined
+
+  const shouldCallVerifier = input.cropPatternResult?.shouldCallVerifier === true
+
+  if (shouldCallVerifier && input.cropPatternResult) {
+    const verifierStart = Date.now()
+    console.log(`[AI-VALIDATION] Running Verifier (crop pattern: ${input.cropPatternResult.status})...`)
+
+    try {
+      const verifierInput: VerifierInput = {
+        curatedImages: curatorOutput.curatedImages,
+        multiSensorNdvi: [],
+        fieldArea: input.areaHa,
+        cropType: input.cropType,
+        cropCategory: input.cropPatternResult.cropCategory,
+        cropPatternResult: input.cropPatternResult,
+        model: input.curatorModel, // Uses same model as Curator (flash-lite)
+      }
+      const verifierOutput = await runVerifier(verifierInput)
+      verifierMs = Date.now() - verifierStart
+
+      cropVerification = verifierOutput.verification
+      verifierCost = calculateCost(
+        verifierOutput.tokenUsage.model,
+        verifierOutput.tokenUsage.inputTokens,
+        verifierOutput.tokenUsage.outputTokens
+      )
+
+      console.log(`[AI-VALIDATION] Verifier: status=${cropVerification.status}, confidence=${cropVerification.confidenceInDeclaredCrop}%`)
+
+      // SHORT-CIRCUIT: If Verifier confirms NO_CROP or MISMATCH, skip Judge entirely
+      if (cropVerification.status === 'NO_CROP' || cropVerification.status === 'MISMATCH') {
+        console.log(`[AI-VALIDATION] SHORT-CIRCUIT: Verifier returned ${cropVerification.status} -- skipping Judge`)
+
+        const curatorCost = calculateCost(
+          curatorOutput.tokenUsage.model,
+          curatorOutput.tokenUsage.inputTokens,
+          curatorOutput.tokenUsage.outputTokens
+        )
+
+        // Build a minimal cost report (no Judge)
+        const emptyCost: AgentCostReport = { model: JUDGE_MODEL, modelLabel: 'Skipped', inputTokens: 0, outputTokens: 0, inputCost: 0, outputCost: 0, totalCost: 0 }
+        const shortCircuitCostReport: CostReport = {
+          curator: curatorCost,
+          verifier: verifierCost,
+          judge: emptyCost,
+          totalInputTokens: curatorCost.inputTokens + (verifierCost?.inputTokens || 0),
+          totalOutputTokens: curatorCost.outputTokens + (verifierCost?.outputTokens || 0),
+          totalCost: curatorCost.totalCost + (verifierCost?.totalCost || 0),
+          durations: { fetchMs, timeseriesMs: 0, curatorMs, verifierMs, judgeMs: 0, totalMs: Date.now() - totalStart },
+        }
+        logCostReport(shortCircuitCostReport)
+
+        // Select evidence images even for short-circuit (useful for UI)
+        const topSc = curatorOutput.curationReport.scores.filter(s => s.included).sort((a, b) => b.score - a.score).slice(0, 4)
+        const evImgs = topSc.map(sc => {
+          const img = curatorOutput.curatedImages.find(i => i.date === sc.date && i.type === sc.type)
+          return img ? { date: img.date, type: img.type, base64: img.base64.substring(0, 500) + '...' } : null
+        }).filter(Boolean) as { date: string; type: string; base64: string }[]
+
+        return {
+          agreement: 'REJECTED',
+          eosAdjustedDate: null,
+          eosAdjustmentReason: `Cultura não identificada: ${cropVerification.visualAssessment}`,
+          stageAgreement: false,
+          visualAlerts: [{
+            type: cropVerification.status === 'NO_CROP' ? 'Sem cultivo detectado' : 'Cultura não corresponde',
+            severity: 'HIGH',
+            description: cropVerification.visualAssessment,
+            affectedArea: '100%',
+          }],
+          harvestReadiness: {
+            ready: false,
+            estimatedDate: null,
+            delayRisk: 'NONE',
+            delayDays: 0,
+            notes: cropVerification.status === 'NO_CROP'
+              ? 'Nenhuma evidência de cultivo detectada. Nenhum cálculo de colheita foi gerado.'
+              : `A cultura declarada (${input.cropType}) não corresponde ao observado. Nenhum cálculo de colheita foi gerado.`,
+          },
+          riskAssessment: {
+            overallRisk: 'CRITICAL',
+            factors: [{
+              category: 'OPERATIONAL',
+              severity: 'CRITICAL',
+              description: cropVerification.status === 'NO_CROP'
+                ? 'Campo sem cultivo identificável. Verificar uso da terra.'
+                : `Cultura declarada (${input.cropType}) não corresponde às imagens. Hipóteses: ${cropVerification.alternativeHypotheses.join(', ')}`,
+            }],
+          },
+          recommendations: cropVerification.status === 'NO_CROP'
+            ? [
+              'Verificar se o talhão foi efetivamente plantado.',
+              'Considerar vistoria em campo para confirmar uso da terra.',
+              `Hipóteses algorítmicas: ${cropVerification.alternativeHypotheses.join('; ')}`,
+            ]
+            : [
+              `A cultura no campo não parece ser ${input.cropType}.`,
+              'Atualizar o tipo de cultura cadastrado se necessário.',
+              `Possibilidades: ${cropVerification.alternativeHypotheses.join('; ')}`,
+              'Considerar vistoria em campo para identificação correta.',
+            ],
+          confidence: cropVerification.confidenceInDeclaredCrop,
+          curationReport: curatorOutput.curationReport,
+          costReport: shortCircuitCostReport,
+          evidenceImages: evImgs,
+          cropVerification,
+          shortCircuited: true,
+        }
+      }
+    } catch (verifierError) {
+      console.warn('[AI-VALIDATION] Verifier error (continuing to Judge):', verifierError)
+      verifierMs = Date.now() - verifierStart
+    }
+  }
+
+  // 4. Run Judge (only reaches here if Verifier didn't short-circuit)
   const judgeStart = Date.now()
   const judgeInput: JudgeInput = {
     curatedImages: curatorOutput.curatedImages,
@@ -363,14 +496,16 @@ export async function runAIValidation(input: AIValidationInput): Promise<AIValid
 
   const costReport: CostReport = {
     curator: curatorCost,
+    verifier: verifierCost,
     judge: judgeCost,
-    totalInputTokens: curatorCost.inputTokens + judgeCost.inputTokens,
-    totalOutputTokens: curatorCost.outputTokens + judgeCost.outputTokens,
-    totalCost: curatorCost.totalCost + judgeCost.totalCost,
+    totalInputTokens: curatorCost.inputTokens + (verifierCost?.inputTokens || 0) + judgeCost.inputTokens,
+    totalOutputTokens: curatorCost.outputTokens + (verifierCost?.outputTokens || 0) + judgeCost.outputTokens,
+    totalCost: curatorCost.totalCost + (verifierCost?.totalCost || 0) + judgeCost.totalCost,
     durations: {
       fetchMs,
       timeseriesMs: 0,
       curatorMs,
+      verifierMs,
       judgeMs,
       totalMs: Date.now() - totalStart,
     },
@@ -462,5 +597,7 @@ export async function runAIValidation(input: AIValidationInput): Promise<AIValid
     curationReport: curatorOutput.curationReport,
     costReport,
     evidenceImages,
+    cropVerification,
+    shortCircuited: false,
   }
 }

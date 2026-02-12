@@ -404,6 +404,14 @@ model AgroData {
   // Diagnósticos do processamento
   diagnostics String? // JSON array of diagnostics
 
+  // ===== VERIFICACAO DE PADRAO DE CULTURA (algoritmico) =====
+  cropPatternStatus      String?    // NO_CROP | ANOMALOUS | ATYPICAL | TYPICAL
+  cropPatternData        String?    // JSON com metricas, hipoteses e razao
+
+  // ===== VERIFICACAO DE CULTURA IA (Agente Verificador) =====
+  aiCropVerificationStatus String?  // CONFIRMED | SUSPICIOUS | MISMATCH | NO_CROP | CROP_FAILURE
+  aiCropVerificationData   String?  // JSON com output completo do Verificador
+
   // ===== VALIDACAO VISUAL IA (todos opcionais) =====
   aiValidationResult     String?    // JSON com resultado completo da validação
   aiValidationDate       DateTime?  // Data da última validação

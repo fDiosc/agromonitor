@@ -6,10 +6,10 @@ Documentação técnica do projeto localizada em `/merx-agro-mvp/`:
 
 | Documento | Descrição | Última Atualização |
 |-----------|-----------|-------------------|
-| [README.md](./README.md) | Visão geral do projeto, quick start e estrutura | 11/02/2026 (v0.0.31) |
-| [CHANGELOG.md](./CHANGELOG.md) | Histórico de mudanças por versão | 11/02/2026 (v0.0.31) |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Arquitetura do sistema, fluxos e integrações | 11/02/2026 (v0.0.31) |
-| [METHODOLOGY.md](./METHODOLOGY.md) | Metodologias técnicas de análise agrícola (incl. IA Visual) | 11/02/2026 |
+| [README.md](./README.md) | Visão geral do projeto, quick start e estrutura | 12/02/2026 (v0.0.33) |
+| [CHANGELOG.md](./CHANGELOG.md) | Histórico de mudanças por versão | 12/02/2026 (v0.0.33) |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Arquitetura do sistema, fluxos e integrações | 12/02/2026 (v0.0.33) |
+| [METHODOLOGY.md](./METHODOLOGY.md) | Metodologias técnicas de análise agrícola (incl. Crop Criticality + IA Visual) | 12/02/2026 (v4.1.0) |
 | [DIAGNOSTICOLOG.md](./DIAGNOSTICOLOG.md) | Especificação do módulo de diagnóstico logístico | 29/01/2026 |
 
 ---
@@ -42,11 +42,11 @@ Documentação original do projeto localizada na raiz (`/`):
 1. **[DIAGNOSTICOLOG.md](./DIAGNOSTICOLOG.md)** - Especificação completa
 2. **[METHODOLOGY.md](./METHODOLOGY.md)** - Seção 8.2 (Análise Logística)
 
-### Para Entender a Validação Visual IA
+### Para Entender a Validação Visual IA e Criticidade de Cultura
 
 1. **[docs/PLAN-AI-VISUAL-VALIDATION.md](./docs/PLAN-AI-VISUAL-VALIDATION.md)** - Plano completo
-2. **[METHODOLOGY.md](./METHODOLOGY.md)** - Seção 11 (Validação Visual por IA)
-3. **[docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md)** - Seção 7 (Pipeline IA) e 8 (Fix EOS)
+2. **[METHODOLOGY.md](./METHODOLOGY.md)** - Seção 11 (Validação Visual por IA + Criticidade)
+3. **[docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md)** - Seção 7 (Pipeline IA), 8 (Fix EOS), 9 (Crop Criticality)
 
 ### Para Acompanhar Mudanças
 
@@ -66,7 +66,7 @@ Logistic Monitor/
 │   ├── DIAGNOSTICOLOG.md       # Módulo logístico
 │   ├── DOCS.md                 # Este índice
 │   ├── docs/                   # Documentos técnicos
-│   │   ├── METHODOLOGY-V2.md   # Fusão EOS, GDD, IA Visual, EOS Fix
+│   │   ├── METHODOLOGY-V2.md   # Fusão EOS, GDD, IA Visual, Crop Criticality (v4.1)
 │   │   ├── PLAN-AI-VISUAL-VALIDATION.md  # Plano validação visual IA
 │   │   ├── PLAN-HYBRID-ANALYSIS.md       # Plano análise híbrida
 │   │   ├── PLAN-REPROCESS-ANALYSIS.md    # Plano reprocessamento
@@ -75,8 +75,8 @@ Logistic Monitor/
 │   ├── app/                    # Código Next.js
 │   ├── components/             # Componentes React
 │   ├── lib/
-│   │   ├── agents/             # Agentes IA (Curador + Juiz)
-│   │   └── services/           # Serviços de negócio
+│   │   ├── agents/             # Agentes IA (Curador + Verificador + Juiz)
+│   │   └── services/           # Serviços de negócio (incl. crop-pattern, eos-fusion)
 │   └── prisma/                 # Schema do banco
 │
 ├── produto.md                  # (Legado) Visão do produto
