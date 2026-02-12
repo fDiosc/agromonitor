@@ -8,6 +8,7 @@ import { PhenologyTimeline } from '@/components/agro/phenology-timeline'
 import { TemplateSelector } from '@/components/templates/template-selector'
 import { AnalysisPanel } from '@/components/templates/analysis-panel'
 import { AIValidationPanel } from '@/components/ai-validation/AIValidationPanel'
+import { FieldMapModal } from '@/components/modals/FieldMapModal'
 import { PrecipitationChart } from '@/components/charts/PrecipitationChart'
 import { ClimateEnvelopeChart } from '@/components/charts/ClimateEnvelopeChart'
 import { WaterBalanceChart } from '@/components/charts/WaterBalanceChart'
@@ -18,7 +19,7 @@ import { calculateFusedEos, EosFusionInput, EosFusionResult } from '@/lib/servic
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { ArrowLeft, Loader2, TrendingUp, RefreshCw, CloudRain, Droplets, Satellite, Thermometer, BrainCircuit } from 'lucide-react'
+import { ArrowLeft, Loader2, TrendingUp, RefreshCw, CloudRain, Droplets, Satellite, Thermometer, BrainCircuit, MapPin } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ProcessingModal, DEFAULT_PROCESSING_STEPS, ProcessingStep } from '@/contexts/processing-context'
 import {
@@ -343,6 +344,7 @@ export default function ReportPage() {
   const [isReprocessing, setIsReprocessing] = useState(false)
   const [isRunningAIValidation, setIsRunningAIValidation] = useState(false)
   const [aiValidationError, setAIValidationError] = useState<string | null>(null)
+  const [showMapModal, setShowMapModal] = useState(false)
 
   const fetchData = useCallback(async () => {
     try {
@@ -963,6 +965,17 @@ export default function ReportPage() {
           onClose={() => setShowProcessingModal(false)}
         />
       )}
+
+      {/* Modal do mapa do polígono */}
+      {showMapModal && field?.geometryJson && (
+        <FieldMapModal
+          isOpen={showMapModal}
+          onClose={() => setShowMapModal(false)}
+          geometryJson={field.geometryJson}
+          fieldName={field.name || 'Talhão'}
+          areaHa={agroData?.areaHa}
+        />
+      )}
       
       <div className="p-8 space-y-8">
         {/* Header */}
@@ -994,6 +1007,18 @@ export default function ReportPage() {
                 </>
               )}
             </Button>
+
+            {field.geometryJson && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowMapModal(true)}
+                className="gap-2"
+              >
+                <MapPin size={14} />
+                Ver no Mapa
+              </Button>
+            )}
             
             <div className="text-right">
               <h2 className="text-xl font-black text-slate-900">{field.name}</h2>

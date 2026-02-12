@@ -20,6 +20,7 @@ export interface Field {
   city: string | null
   state: string | null
   areaHa: number | null
+  cropType?: string | null
   agroData?: {
     areaHa: number | null
     volumeEstimatedKg: number | null
@@ -70,7 +71,7 @@ interface FieldTableProps {
 type SortKey =
   | 'name' | 'status' | 'area' | 'volume'
   | 'emergence' | 'harvest' | 'confidence'
-  | 'cropPattern'
+  | 'cropType' | 'cropPattern'
   | 'aiAgreement' | 'aiEos' | 'aiReady' | 'aiConfidence'
 
 type SortDir = 'asc' | 'desc'
@@ -93,6 +94,7 @@ function getSortValue(field: Field, key: SortKey): number | string | null {
       return eos ? new Date(eos).getTime() : null
     }
     case 'confidence':   return field.agroData?.confidenceScore ?? null
+    case 'cropType':     return field.cropType?.toLowerCase() ?? null
     case 'cropPattern':  return CROP_PATTERN_ORDER[field.agroData?.cropPatternStatus ?? ''] ?? null
     case 'aiAgreement':  return AGREEMENT_ORDER[field.agroData?.aiValidationAgreement ?? ''] ?? null
     case 'aiEos': {
@@ -210,7 +212,7 @@ export function FieldTable({ fields, onDelete, onReprocess, isDeleting, isReproc
   return (
     <div className="bg-white rounded-[32px] border border-slate-200 overflow-hidden shadow-sm">
       <div className="overflow-x-auto">
-        <table className="w-full text-left min-w-[1200px]">
+        <table className="w-full text-left min-w-[1300px]">
           <thead className="bg-slate-50 border-b">
             <tr>
               <TH k="status">Status</TH>
@@ -220,7 +222,8 @@ export function FieldTable({ fields, onDelete, onReprocess, isDeleting, isReproc
               <TH k="emergence">Emerg.</TH>
               <TH k="harvest" className="text-blue-500">Colheita</TH>
               <TH k="confidence">Conf.</TH>
-              <TH k="cropPattern">Cultura</TH>
+              <TH k="cropType">Cultura</TH>
+              <TH k="cropPattern">Status</TH>
               <TH k="aiAgreement">IA</TH>
               <TH k="aiEos">EOS IA</TH>
               <TH k="aiReady">Pronta</TH>
@@ -305,19 +308,30 @@ export function FieldTable({ fields, onDelete, onReprocess, isDeleting, isReproc
                     <span className="font-semibold text-slate-600 text-[12px]">{fmtDate(sos)}</span>
                   </td>
 
-                  {/* COLHEITA (prev.) */}
+                  {/* COLHEITA (prev.) — suppress when crop issue */}
                   <td className="px-3 py-3">
-                    <span className="font-bold text-blue-700 text-[12px]">{fmtDate(eos)}</span>
+                    <span className="font-bold text-blue-700 text-[12px]">{hasCropIssue ? '—' : fmtDate(eos)}</span>
                   </td>
 
-                  {/* CONFIANÇA MODELO */}
+                  {/* CONFIANÇA MODELO — suppress when crop issue */}
                   <td className="px-3 py-3">
-                    <span className={`font-bold text-[12px] ${confColor(confScore)}`}>
-                      {confScore != null ? `${confScore}%` : '—'}
+                    {hasCropIssue ? (
+                      <span className="text-slate-300">—</span>
+                    ) : (
+                      <span className={`font-bold text-[12px] ${confColor(confScore)}`}>
+                        {confScore != null ? `${confScore}%` : '—'}
+                      </span>
+                    )}
+                  </td>
+
+                  {/* CULTURA (crop type) */}
+                  <td className="px-3 py-3">
+                    <span className="font-bold text-slate-600 text-[11px] uppercase">
+                      {field.cropType || '—'}
                     </span>
                   </td>
 
-                  {/* CULTURA (crop pattern) */}
+                  {/* STATUS (crop pattern + verifier) */}
                   <td className="px-3 py-3">
                     {cropPattern === 'NO_CROP' ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border bg-red-50 text-red-700 border-red-300" title="Sem cultivo detectado">
@@ -332,11 +346,13 @@ export function FieldTable({ fields, onDelete, onReprocess, isDeleting, isReproc
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />Atípico
                       </span>
                     ) : cropPattern === 'TYPICAL' ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-300">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />OK
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-300" title="Cultura detectada e compatível">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Detectada
                       </span>
                     ) : (
-                      <span className="text-slate-300 text-[10px]">—</span>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border bg-slate-50 text-slate-500 border-slate-200">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />Pendente
+                      </span>
                     )}
                     {cropVerif && cropVerif !== 'CONFIRMED' && (
                       <span className="block text-[8px] font-semibold mt-0.5" title={`Verificação IA: ${cropVerif}`}>
