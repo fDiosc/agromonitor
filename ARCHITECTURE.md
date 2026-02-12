@@ -182,16 +182,20 @@ No primeiro acesso após login, usuários que não aceitaram o disclaimer são a
 ```
 components/
 ├── fields/
-│   └── field-table.tsx      # Tabela ordenável de talhões (13 cols, sorting, Field type export)
+│   └── field-table.tsx      # Tabela ordenável de talhões (colunas Cultura+Status, sorting, Field type export)
 ├── ai-validation/
 │   └── AIValidationPanel.tsx # Painel de resultados IA no relatório
+├── modals/
+│   ├── DisclaimerModal.tsx  # Modal de termos de uso
+│   ├── EditFieldModal.tsx   # Modal de edição de talhão
+│   └── FieldMapModal.tsx    # Modal de mapa do polígono (Leaflet, satélite/OSM)
 ├── layout/
 │   ├── app-layout.tsx       # Layout principal com sidebar
 │   ├── sidebar.tsx          # Navegação lateral
 │   ├── sidebar-footer.tsx   # Versão e changelog
 │   └── changelog-modal.tsx  # Modal de changelog
-├── map/
-│   └── MapDrawer.tsx        # Desenho de polígonos
+├── maps/
+│   └── map-drawer.tsx       # Desenho de polígonos (Leaflet Draw)
 └── ui/
     ├── button.tsx
     ├── card.tsx
@@ -526,7 +530,7 @@ Base URL: `https://api.merx.app.br`
 
 **Uso em Templates**: Geração de análises textuais (Crédito, Logística, Risco).
 
-**Uso em Validação Visual (v0.0.29, atualizado v0.0.32/v0.0.33)**: Pipeline de 3 agentes (Curator → Verifier → Judge) que analisam imagens de satélite para confirmar cultura declarada e validar projeções de fenologia. Verifier opera como gate para o Judge, com short-circuit em NO_CROP/MISMATCH. Resultados do Judge são suprimidos no dashboard e relatório quando crop issues são detectados.
+**Uso em Validação Visual (v0.0.29, atualizado v0.0.32/v0.0.33)**: Pipeline de 3 agentes (Curator → Verifier → Judge) que analisam imagens de satélite para confirmar cultura declarada e validar projeções de fenologia. Verifier opera como gate para o Judge, com short-circuit em NO_CROP/MISMATCH. Resultados do Judge são suprimidos no dashboard e relatório quando crop issues são detectados. Dashboard reestruturado (v0.0.33): colunas Cultura (tipo declarado) + Status (badge algorítmico) separadas. Relatório inclui modal de mapa com polígono do talhão via Leaflet (satélite/OSM).
 
 ### Sentinel Hub (Copernicus Data Space)
 

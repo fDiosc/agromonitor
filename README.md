@@ -26,6 +26,7 @@ O **MERX AGRO Monitor** é uma plataforma multi-tenant que transforma dados de s
 - **Fusão EOS Corrigida (v0.0.30)** - Single source of truth: data canônica calculada no servidor
 - **Pipeline de Criticidade de Cultura (v0.0.32)** - Validação algorítmica + IA Verificadora da cultura declarada (8 culturas, 3 categorias)
 - **Sanidade EOS + ATYPICAL (v0.0.33)** - NDVI prevalece sobre GDD em contradições; classificação ATYPICAL para ciclos indefinidos; supressão automática de resultados IA quando cultura é duvidosa
+- **Visualização de Polígono (v0.0.33)** - Modal Leaflet no relatório com mapa satélite/OSM exibindo o polígono do talhão
 - **Feature Flags** - Configuração de módulos por workspace
 
 ---
@@ -145,8 +146,9 @@ merx-agro-mvp/
 │       └── templates/          # Templates de análise
 ├── components/
 │   ├── layout/                 # Sidebar, AppLayout, Changelog
-│   ├── fields/                 # Componentes de talhões
-│   ├── map/                    # Componentes de mapa
+│   ├── fields/                 # Componentes de talhões (field-table com colunas Cultura+Status)
+│   ├── modals/                 # Modais (Disclaimer, EditField, FieldMapModal)
+│   ├── map/                    # Componentes de mapa (MapDrawer)
 │   └── ui/                     # Shadcn/ui components
 ├── lib/
 │   ├── auth.ts                 # Utilitários de autenticação (JWT)

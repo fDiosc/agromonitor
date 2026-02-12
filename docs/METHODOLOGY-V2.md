@@ -1013,18 +1013,24 @@ O prompt do Verificador inclui padrões visuais esperados para cada uma das 8 cu
 
 ### 9.7 Interface do Usuário
 
-#### Dashboard — Coluna "Cultura"
+#### Dashboard — Colunas "Cultura" e "Status" (v0.0.33)
 
-A tabela de talhões inclui uma coluna "Cultura" com badges coloridos:
+A tabela de talhões possui duas colunas dedicadas à cultura:
+
+1. **Cultura**: Exibe o tipo de cultura declarado (SOJA, MILHO, etc.) — dado informado pelo usuário
+2. **Status**: Exibe o resultado da análise algorítmica de padrão NDVI com badges coloridos:
 
 | Status | Cor | Label | Descrição |
 |--------|-----|-------|-----------|
 | NO_CROP | Vermelho | Sem Cultivo | Solo exposto ou sem vegetação ativa |
 | ANOMALOUS | Laranja | Anômalo | Padrão NDVI não corresponde à cultura |
 | ATYPICAL | Âmbar | Atípico | Padrão NDVI parcialmente compatível |
-| TYPICAL | Verde | OK | Padrão NDVI normal para a cultura |
+| TYPICAL | Verde | Detectada | Padrão NDVI normal para a cultura |
+| null | Cinza | Pendente | Análise ainda não executada |
 
 Se `aiCropVerificationStatus` estiver presente e não for `CONFIRMED`, uma segunda linha mostra o status da verificação IA.
+
+Adicionalmente, quando `hasCropIssue` é detectado, as colunas **Colheita (prev.)** e **Confiança Modelo** exibem "—" em vez de dados potencialmente enganosos.
 
 #### Dashboard — Supressão de Resultados IA (v0.0.33)
 
@@ -1086,6 +1092,24 @@ O `CropAlertCard` é o primeiro elemento exibido (no TOPO, acima de todos os car
 - Hipóteses geradas pelo serviço algorítmico
 - Dados do Verificador IA (se disponíveis)
 - Aviso claro: "Nenhum cálculo de EOS/colheita foi gerado" (para NO_CROP/MISMATCH)
+
+#### Relatório — Visualização do Polígono (v0.0.33)
+
+O header do relatório inclui um botão **"Ver no Mapa"** (ícone MapPin) que abre um modal com a visualização do polígono do talhão no mapa. Disponível apenas quando `field.geometryJson` existe.
+
+**Componente**: `FieldMapModal.tsx` (`components/modals/`)
+
+| Característica | Detalhe |
+|----------------|---------|
+| **Camada padrão** | Satélite ESRI (World Imagery) |
+| **Camada alternativa** | OpenStreetMap (toggle via Layer Control) |
+| **Auto-fit** | Bounds ajustados automaticamente ao polígono com padding |
+| **Estilo do polígono** | Preenchimento verde (#10b981, 25% opacidade), borda #059669 |
+| **Fullscreen** | Botão de expandir/reduzir no header do modal |
+| **Escala** | Controle de escala métrica (canto inferior esquerdo) |
+| **Leaflet** | Import dinâmico (SSR-safe), CSS injetado em runtime |
+
+O modal é read-only — apenas visualização, sem controles de edição de geometria.
 
 #### Status de Processamento — Crop Issue ≠ Erro
 

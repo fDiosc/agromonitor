@@ -55,6 +55,12 @@ Correções críticas na fusão EOS para evitar projeções contraditórias, ref
   - Short-circuit (NO_CROP/MISMATCH): status mudou de `PARTIAL` para `SUCCESS` — crop issue é um resultado válido, não erro
   - Normal path: missing SOS/EOS causado por crop issue (ATYPICAL/ANOMALOUS) não degrada para `PARTIAL`. `PARTIAL` reservado exclusivamente para falhas reais de dados (sem NDVI, API fora, etc.)
 - **`phenology-timeline.tsx` — Estado limpo sem EOS**: Quando `eosDate` é null, mostra "Sem projeção disponível" em vez de "Status: DETECÇÃO REAL"
+- **`field-table.tsx` — Reestruturação de colunas no dashboard**:
+  - Coluna "Cultura" dividida em duas: **Cultura** (tipo declarado: SOJA, MILHO, etc.) e **Status** (badge algorítmico)
+  - Nova badge "Detectada" (verde) para status TYPICAL (anteriormente vazio)
+  - Colunas "Colheita (prev.)" e "Confiança Modelo" exibem "—" quando `hasCropIssue`
+- **`reports/[id]/page.tsx` — Modal de mapa do polígono**: Botão "Ver no Mapa" no header do relatório abre modal com visualização Leaflet do polígono do talhão
+- **`FieldMapModal.tsx` — Novo componente**: Modal read-only com mapa Leaflet, camada satélite ESRI (default) + OpenStreetMap (toggle), auto-fit bounds, controle de fullscreen, escala métrica
 - **`docs/METHODOLOGY-V2.md`**: Atualizado para v4.1 com documentação completa das correções EOS, novo comportamento ATYPICAL, e regras de supressão IA
 
 ---

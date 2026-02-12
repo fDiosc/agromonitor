@@ -28,7 +28,7 @@ export const CHANGELOG: ChangelogEntry[] = [
   {
     version: '0.0.33',
     date: '2026-02-12',
-    title: 'Sanidade EOS + ATYPICAL + Supressão IA',
+    title: 'Sanidade EOS + ATYPICAL + Supressão IA + Mapa',
     type: 'fix',
     changes: [
       'EOS Fusion: NDVI prevalece sobre GDD em contradições (planta verde com GDD 100% não declara maturação)',
@@ -36,6 +36,9 @@ export const CHANGELOG: ChangelogEntry[] = [
       'Classificação ATYPICAL refinada: ciclo indefinido (sem SOS/EOS) e baixa amplitude para culturas anuais',
       'Relatório: Alerta de Cultura no TOPO; cards de Volume, EOS, GDD suprimidos quando crop issue',
       'Relatório: crop issues mostram apenas card algorítmico, painel Judge é suprimido',
+      'Relatório: botão "Ver no Mapa" exibe polígono do talhão em modal Leaflet (satélite + OSM)',
+      'Dashboard: coluna Cultura separada em Tipo + Status; badge "Detectada" para TYPICAL',
+      'Dashboard: colunas Colheita e Confiança mostram "—" quando crop issue detectado',
       'Dashboard: colunas IA, EOS IA, Pronta e Conf. IA mostram "—" quando crop issue detectado',
       'Status: crop issue (NO_CROP, ATYPICAL, ANOMALOUS) gera "Processado" em vez de "Parcial"',
       'Correção TypeError: Array.isArray guard em hypotheses/evidence do Verificador',

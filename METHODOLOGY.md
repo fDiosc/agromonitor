@@ -947,6 +947,8 @@ Antes da validação visual, uma análise algorítmica (custo zero) verifica se 
 - **Agente Verificador**: Modelo flash-lite, especializado em identificar presença/ausência de cultura
 - **Supressão IA (v0.0.33)**: Quando crop issue detectado (NO_CROP, ANOMALOUS, ATYPICAL ou Verifier ≠ CONFIRMED), resultados do Judge são suprimidos no dashboard e relatório
 - **Layout orientado por crop issue (v0.0.33)**: Alerta de Cultura no TOPO do relatório; cards de Volume, EOS, GDD, Confiança suprimidos; status de processamento é `SUCCESS` (não `PARTIAL`)
+- **Dashboard reestruturado (v0.0.33)**: Coluna "Cultura" dividida em Tipo (cultura declarada) + Status (badge algorítmico: Detectada/Atípico/Anômalo/Sem Cultivo/Pendente); Colheita e Confiança suprimidos para crop issues
+- **Visualização de polígono (v0.0.33)**: Botão "Ver no Mapa" no relatório abre modal Leaflet com polígono do talhão (satélite ESRI default, OSM toggle, auto-fit bounds)
 
 ### 11.2 Arquitetura de Agentes
 
@@ -1116,7 +1118,7 @@ Todas as análises geradas por modelos de linguagem (LLM) exibem:
 | 3.1.0 | 2026-02 | **Correção Pipeline EOS**: Single source of truth, GDD backtracking, mapeamento stress PT→EN, server-side canonical fusedEos, eliminação de divergência client/server |
 | 3.2.0 | 2026-02 | **Dashboard Avançado**: Tabela ordenável com 13 colunas, filtros de janela de colheita/confiança/IA, correção mapeamento de campos AI na API, 6 fontes de dados no card IA |
 | 4.0.0 | 2026-02 | **Pipeline de Criticidade de Cultura**: Verificação algorítmica de padrão NDVI para 8 culturas (3 categorias), Agente Verificador IA, short-circuit NO_CROP, dashboard com coluna/filtro de cultura |
-| 4.1.0 | 2026-02 | **Sanidade EOS + ATYPICAL**: NDVI prevalece sobre GDD em contradições, GDD override para datas passadas, ATYPICAL refinado (ciclo indefinido + baixa amplitude), supressão de resultados Judge no dashboard/relatório para crop issues |
+| 4.1.0 | 2026-02 | **Sanidade EOS + ATYPICAL**: NDVI prevalece sobre GDD em contradições, GDD override para datas passadas, ATYPICAL refinado (ciclo indefinido + baixa amplitude), supressão de resultados Judge no dashboard/relatório para crop issues, dashboard com colunas Cultura+Status separadas, modal de mapa do polígono no relatório |
 
 ---
 
