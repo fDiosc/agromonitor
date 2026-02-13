@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.0.34'
+export const APP_VERSION = '0.0.36'
 
 // Fases do produto
 export const VERSION_PHASES = {
@@ -25,6 +25,40 @@ export const CHANGELOG: ChangelogEntry[] = [
   // ==================== ALPHA (0.0.x) ====================
   // Changelog consolidado - apenas features finais implementadas
   
+  {
+    version: '0.0.36',
+    date: '2026-02-13',
+    title: 'Edição de Subtalhões + Mapa com Polígonos Filhos + Breadcrumb',
+    type: 'feature',
+    changes: [
+      'Edição de subtalhões: modal completo com nome, cultura e dados agronômicos editáveis',
+      'Campos herdados: produtor e caixa logística travados (herdados do talhão pai)',
+      'Botão editar para subtalhões no dashboard e na página de subtalhões',
+      'Dados detectados preservados: valores auto-gerados exibidos como referência no modal',
+      'Mapa do pai: polígonos dos subtalhões exibidos como overlay no FieldMapModal',
+      'Breadcrumb de navegação: relatório de subtalhão mostra link para relatório do pai',
+      'Navegação preservada: router.back() mantém histórico (subtalhão → pai → dashboard)',
+      'API estendida: GET /api/fields/[id] inclui subFields (geometrias) e parentField (id, nome)',
+      'Sidebar: removido item "Relatórios" (rota inexistente, acesso via dashboard)',
+    ],
+  },
+  {
+    version: '0.0.35',
+    date: '2026-02-13',
+    title: 'Visão Folder + Filtros Persistentes + Comparação + Edição de Polígonos',
+    type: 'feature',
+    changes: [
+      'Visão folder de subtalhões: expand/collapse com ícones, linhas indentadas azuladas',
+      'Filtros persistentes: sincronização via URL search params, mantém filtros ao navegar',
+      'Aba comparativa: tabela pai vs filhos + NDVI overlay (feature flag enableSubFieldComparison)',
+      'Edição de polígonos: arrastar vértices pós-desenho e em subtalhões existentes',
+      'Buffer 20m na validação de contenção geométrica (imprecisão de desenho)',
+      'Reprocessamento bloqueado no pai quando tem subtalhões',
+      'Correção de contagem dupla na logística (exclui pais com filhos da agregação)',
+      'Pesquisa textual no dashboard: nome, produtor, cidade',
+      'Filtro de subtalhões: Todos, Sim, Não',
+    ],
+  },
   {
     version: '0.0.34',
     date: '2026-02-12',

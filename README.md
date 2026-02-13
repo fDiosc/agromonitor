@@ -31,7 +31,10 @@ O **MERX AGRO Monitor** é uma plataforma multi-tenant que transforma dados de s
 - **Persistência S3 (v0.0.34)** - Imagens de satélite armazenadas em AWS S3 com segregação por workspace; compartilhamento entre IA e Análise Visual; fetch incremental
 - **Edição Agronômica (v0.0.34)** - Botão editar no dashboard para ajustar plantio, cultura e safra com reprocessamento; preservação de dados algorítmicos originais
 - **Subtalhões (v0.0.34)** - Hierarquia pai/filho de talhões; desenho de polígonos contidos; análise agrícola individual por subtalhão
-- **Feature Flags** - Configuração de módulos por workspace (incluindo `enableVisualAnalysis`, `enableSubFields`)
+- **Edição de Subtalhões (v0.0.36)** - Modal de edição completo para subtalhões (nome, cultura, dados agronômicos); produtor e caixa logística herdados do pai (travados); dados detectados preservados como referência
+- **Mapa com Polígonos Filhos (v0.0.36)** - Relatório do pai exibe polígonos dos subtalhões como overlay no mapa (cores distintas + tooltips)
+- **Breadcrumb de Navegação (v0.0.36)** - Relatório de subtalhão exibe link clicável para relatório do pai; router.back() preserva histórico
+- **Feature Flags** - Configuração de módulos por workspace (incluindo `enableVisualAnalysis`, `enableSubFields`, `enableSubFieldComparison`)
 
 ---
 
@@ -107,7 +110,7 @@ merx-agro-mvp/
 │   │   │   └── logistics-units/# Gestão de Caixas Logísticas
 │   │   ├── fields/new/         # Cadastro de talhões
 │   │   ├── settings/           # Configurações do workspace (incl. Visual Analysis, SubFields)
-│   │   └── reports/[id]/       # Relatórios detalhados (Tabs: Relatório + Análise Visual)
+│   │   └── reports/[id]/       # Relatórios detalhados (Tabs: Relatório + Análise Visual + Subtalhões)
 │   ├── login/                  # Página de login
 │   ├── change-password/        # Troca de senha (primeiro acesso)
 │   └── api/
@@ -118,7 +121,7 @@ merx-agro-mvp/
 │       ├── producers/          # CRUD de produtores
 │       ├── fields/             # CRUD de talhões
 │       │   └── [id]/
-│       │       ├── subfields/  # GET/POST subtalhões
+│       │       ├── subfields/  # GET/POST subtalhões + comparison
 │       │       └── images/     # GET imagens de satélite (URLs assinadas S3)
 │       ├── logistics/          # Diagnóstico logístico
 │       ├── logistics-units/    # Caixas logísticas e cobertura
@@ -127,7 +130,7 @@ merx-agro-mvp/
 ├── components/
 │   ├── layout/                 # Sidebar, AppLayout, Changelog
 │   ├── fields/                 # Componentes de talhões (field-table com colunas Cultura+Status)
-│   ├── modals/                 # Modais (Disclaimer, EditField, FieldMapModal)
+│   ├── modals/                 # Modais (Disclaimer, EditField+isSubField, FieldMapModal+siblings)
 │   ├── maps/                   # SubFieldMap (Leaflet + leaflet-draw)
 │   ├── visual-analysis/        # ImageComparisonSlider, VisualAnalysisTab
 │   ├── map/                    # Componentes de mapa (MapDrawer)
@@ -172,11 +175,11 @@ merx-agro-mvp/
 
 | Documento | Descrição | Status |
 |-----------|-----------|--------|
-| [README.md](./README.md) | Este documento - visão geral | ✅ Atualizado (v0.0.34) |
-| [CHANGELOG.md](./CHANGELOG.md) | Histórico de mudanças | ✅ Atualizado (v0.0.34) |
-| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Arquitetura detalhada | ✅ Atualizado (v0.0.34) |
+| [README.md](./README.md) | Este documento - visão geral | ✅ Atualizado (v0.0.36) |
+| [CHANGELOG.md](./CHANGELOG.md) | Histórico de mudanças | ✅ Atualizado (v0.0.36) |
+| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Arquitetura detalhada | ✅ Atualizado (v0.0.36) |
 | [METHODOLOGY.md](./docs/METHODOLOGY.md) | **Metodologia unificada** - Fenologia, Fusão EOS, GDD, Criticidade, IA Visual | ✅ Atualizado (v0.0.33) |
-| [Apisproject.md](./docs/Apisproject.md) | Documentação completa de APIs (internas e externas) | ✅ Atualizado (v0.0.34) |
+| [Apisproject.md](./docs/Apisproject.md) | Documentação completa de APIs (internas e externas) | ✅ Atualizado (v0.0.36) |
 | [DEPLOY.md](./docs/DEPLOY.md) | Guia de deploy em produção | ✅ Atualizado (v0.0.34) |
 | [DIAGNOSTICOLOG.md](./docs/DIAGNOSTICOLOG.md) | Especificação módulo logístico | ✅ Atualizado |
 
@@ -184,7 +187,7 @@ merx-agro-mvp/
 
 | Documento | Descrição | Status |
 |-----------|-----------|--------|
-| [Apisproject.md](./docs/Apisproject.md) | APIs externas (Merx, Copernicus, Gemini, S3) + internas (35+ endpoints) | ✅ Atualizado (v0.0.34) |
+| [Apisproject.md](./docs/Apisproject.md) | APIs externas (Merx, Copernicus, Gemini, S3) + internas (35+ endpoints) | ✅ Atualizado (v0.0.36) |
 | [REPORT-MERX-NDVI-GAP.md](./docs/REPORT-MERX-NDVI-GAP.md) | Relatório técnico: gap de dados NDVI | ✅ Concluído |
 
 ### Documentos Arquivados (docs/archive/)
@@ -286,6 +289,9 @@ Visualização completa por talhão:
 - Linhas de referência (plantio, emergência, colheita)
 - Projeção baseada em correlação
 - Cards de métricas e alertas
+- Breadcrumb de navegação para subtalhões (link para relatório do pai)
+- Mapa com polígonos de subtalhões como overlay (talhões pai)
+- Aba comparativa pai vs filhos (tabela + NDVI overlay, v0.0.36)
 
 ### 3. Diagnóstico Logístico
 
@@ -448,7 +454,7 @@ Permite ajustar dados agronômicos após o cadastro do talhão:
 - Histórico de edições registrado em `editHistory` (JSON com timestamp, campo, valor anterior e novo)
 - Dashboard exibe badge "editado" para talhões com histórico
 
-### 11. Subtalhões (v0.0.34)
+### 11. Subtalhões (v0.0.34, v0.0.36)
 
 Hierarquia pai/filho de talhões para análise granular:
 
@@ -460,12 +466,26 @@ Hierarquia pai/filho de talhões para análise granular:
 - Dashboard exibe visão folder-like (pai como pasta, filhos como itens)
 - Mapa do subtalhão destaca polígono do filho, exibe irmãos e geometria do pai
 
+**Edição de Subtalhões (v0.0.36):**
+- Modal de edição completo (`EditFieldModal` com `isSubField=true`)
+- Campos editáveis: nome, cultura, data de plantio, início da safra
+- Campos herdados (travados): produtor vinculado e caixa logística do pai
+- Dados detectados automaticamente exibidos como referência na aba Agronômico
+- Reprocessamento automático ao alterar dados agronômicos (preserva `detectedXxx`)
+- Botão editar disponível no dashboard (linhas filhas) e na página de subtalhões (sidebar)
+
+**Mapa e Navegação (v0.0.36):**
+- Relatório do pai exibe polígonos de todos os subtalhões no mapa (cores distintas + tooltips)
+- Relatório do subtalhão exibe breadcrumb com link para relatório do pai
+- Navegação com `router.back()` preserva histórico completo
+
 **Validação:**
-- Geometria do subtalhão deve estar contida no polígono pai (`@turf/boolean-contains`)
+- Geometria do subtalhão deve estar contida no polígono pai (`@turf/boolean-contains` com buffer de 20m)
 - Talhão pai com subtalhões não pode ser reprocessado diretamente
 
 **Configuração:**
 - `enableSubFields` - Habilitar funcionalidade de subtalhões
+- `enableSubFieldComparison` - Habilitar aba comparativa pai vs filhos no relatório
 
 ---
 

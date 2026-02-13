@@ -219,12 +219,18 @@ export async function GET(request: NextRequest) {
           select: {
             logisticsUnitId: true
           }
+        },
+        _count: {
+          select: { subFields: true }
         }
       }
-    }) as (FieldWithData & { logisticsDistances: { logisticsUnitId: string }[] })[]
+    }) as (FieldWithData & { logisticsDistances: { logisticsUnitId: string }[], _count?: { subFields: number } })[]
     
     // Filtrar apenas talhões com eosDate válido (não pode fazer no where do Prisma)
-    let fields = fieldsRaw.filter(f => f.agroData?.eosDate !== null)
+    // Excluir pais que possuem subtalhões para evitar contagem dupla de área/volume
+    let fields = fieldsRaw
+      .filter(f => f.agroData?.eosDate !== null)
+      .filter(f => (f._count?.subFields ?? 0) === 0)
     
     // Apply logistics unit filter if provided (usando dados persistidos)
     if (unitIdFilter && unitIdFilter.length > 0) {

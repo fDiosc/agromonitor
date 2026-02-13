@@ -7,9 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
   ArrowLeft, Plus, Loader2, RefreshCw, Trash2, MapPin, Leaf,
-  CheckCircle, AlertCircle, Pencil
+  CheckCircle, AlertCircle, Pencil, Move
 } from 'lucide-react'
 import dynamic from 'next/dynamic'
+import { EditFieldModal } from '@/components/modals/EditFieldModal'
+import { formatDateForInput } from '@/lib/utils/date-utils'
 
 // Lazy load map to avoid SSR issues
 const SubFieldMap = dynamic(() => import('@/components/maps/SubFieldMap'), { 
@@ -24,6 +26,9 @@ interface SubField {
   cropType: string
   areaHa: number | null
   geometryJson: string
+  plantingDateInput?: string | null
+  seasonStartDate?: string | null
+  editHistory?: string | null
   agroData?: {
     areaHa: number | null
     confidenceScore: number | null
@@ -32,6 +37,9 @@ interface SubField {
     cropPatternStatus: string | null
     phenologyHealth: string | null
     peakNdvi: number | null
+    detectedPlantingDate: string | null
+    detectedCropType: string | null
+    detectedConfidence: string | null
   } | null
 }
 
@@ -58,6 +66,10 @@ export default function SubFieldsPage() {
   const [error, setError] = useState<string | null>(null)
   const [editingName, setEditingName] = useState<string | null>(null)
   const [editNameValue, setEditNameValue] = useState('')
+  const [editingGeometryId, setEditingGeometryId] = useState<string | null>(null)
+  const [savingGeometry, setSavingGeometry] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingSubField, setEditingSubField] = useState<SubField | null>(null)
 
   const fetchData = useCallback(async () => {
     try {
@@ -157,6 +169,33 @@ export default function SubFieldsPage() {
     }
   }
 
+  const handleEditGeometry = async (subFieldId: string, geometryJson: string) => {
+    setSavingGeometry(true)
+    try {
+      const res = await fetch(`/api/fields/${subFieldId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ geometryJson })
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        setError(data.error || 'Erro ao atualizar geometria')
+        return
+      }
+
+      // Atualizar localmente
+      setSubFields(prev => prev.map(sf =>
+        sf.id === subFieldId ? { ...sf, geometryJson } : sf
+      ))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao atualizar geometria')
+    } finally {
+      setEditingGeometryId(null)
+      setSavingGeometry(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-8 flex items-center justify-center min-h-[50vh]">
@@ -242,6 +281,9 @@ export default function SubFieldsPage() {
                   onSelect={setSelectedSubFieldId}
                   isDrawing={isDrawing}
                   onDrawComplete={handleCreateSubField}
+                  editingId={editingGeometryId}
+                  onEditComplete={handleEditGeometry}
+                  onEditCancel={() => setEditingGeometryId(null)}
                 />
               )}
             </CardContent>
@@ -326,6 +368,17 @@ export default function SubFieldsPage() {
                             )}
                           </div>
                           <div className="flex items-center gap-0.5 ml-2">
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-500 hover:text-amber-700" 
+                              onClick={(e) => { e.stopPropagation(); setEditingSubField(sf); setShowEditModal(true) }}
+                              title="Editar subtalhão">
+                              <Leaf size={12} />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-500 hover:text-amber-700" 
+                              onClick={(e) => { e.stopPropagation(); setEditingGeometryId(sf.id); setSelectedSubFieldId(sf.id) }}
+                              disabled={!!editingGeometryId || isDrawing || savingGeometry}
+                              title="Editar geometria">
+                              <Move size={12} />
+                            </Button>
                             <Button variant="ghost" size="icon" className="h-7 w-7" 
                               onClick={(e) => { e.stopPropagation(); handleReprocess(sf.id) }}
                               disabled={reprocessing === sf.id || sf.status === 'PROCESSING'}
@@ -349,6 +402,28 @@ export default function SubFieldsPage() {
           </Card>
         </div>
       </div>
+
+      <EditFieldModal
+        isOpen={showEditModal}
+        onClose={() => { setShowEditModal(false); setEditingSubField(null) }}
+        onSuccess={() => fetchData()}
+        field={editingSubField ? {
+          id: editingSubField.id,
+          name: editingSubField.name,
+          producerId: null,
+          logisticsUnitId: null,
+          plantingDateInput: editingSubField.plantingDateInput,
+          cropType: editingSubField.cropType,
+          seasonStartDate: editingSubField.seasonStartDate,
+          detectedPlantingDate: editingSubField.agroData?.detectedPlantingDate,
+          detectedCropType: editingSubField.agroData?.detectedCropType,
+          detectedConfidence: editingSubField.agroData?.detectedConfidence,
+          editHistory: editingSubField.editHistory,
+        } : null}
+        producers={[]}
+        logisticsUnits={[]}
+        isSubField
+      />
     </div>
   )
 }

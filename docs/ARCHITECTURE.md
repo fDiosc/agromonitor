@@ -177,32 +177,63 @@ No primeiro acesso após login, usuários que não aceitaram o disclaimer são a
 - Ordenação padrão: colheita prevista mais próxima primeiro
 - 10 filtros combinatórios em 3 linhas: pesquisa textual (nome, produtor, cidade), subtalhões (sim/não), status, tipo atribuição, caixa logística, colheita, confiança, cultura, IA, resultado IA
 - Processamento server-side de JSON pesados (rawAreaData → fusedEosDate, aiValidationAgreement → harvestReady)
-- **Visão folder de subtalhões**: Talhões pai com subtalhões exibem ícone de pasta com expand/collapse. Subtalhões aparecem como linhas indentadas sob o pai com background azulado, nome do pai como referência, e ações próprias (reprocessar, relatório, excluir)
+- **Visão folder de subtalhões**: Talhões pai com subtalhões exibem ícone de pasta com expand/collapse. Subtalhões aparecem como linhas indentadas sob o pai com background azulado, nome do pai como referência, e ações próprias (editar, reprocessar, relatório, excluir)
 - API `/api/fields` retorna subtalhões inline com agroData processado (mesma lógica de transformação do pai)
+- **Edição de subtalhões (v0.0.36)**: Botão editar nas linhas filhas abre `EditFieldModal` com `isSubField=true` (produtor/logística herdados e travados)
 
 **Componentes Principais:**
 ```
 components/
 ├── fields/
-│   └── field-table.tsx      # Tabela ordenável com visão folder (pai + filhos expandíveis), sorting, Field type export
+│   ├── field-table.tsx        # Tabela ordenável com visão folder (pai + filhos expandíveis), sorting
+│   ├── field-table-types.ts   # Field, FieldTableProps, SortKey, SortDir, getSortValue, compare
+│   ├── field-table-config.tsx # Configuração de colunas, statusConfig, templateColors, bestEos
+│   └── FieldRowCells.tsx      # Células da tabela (renderização por coluna, botão editar p/ filhos)
 ├── ai-validation/
-│   └── AIValidationPanel.tsx # Painel de resultados IA no relatório
+│   └── AIValidationPanel.tsx  # Painel de resultados IA no relatório
 ├── modals/
-│   ├── DisclaimerModal.tsx  # Modal de termos de uso
-│   ├── EditFieldModal.tsx   # Modal de edição de talhão
-│   └── FieldMapModal.tsx    # Modal de mapa do polígono (Leaflet, satélite/OSM)
+│   ├── DisclaimerModal.tsx   # Modal de termos de uso
+│   ├── EditFieldModal.tsx    # Modal de edição de talhão/subtalhão (tabs: general, agronomic; isSubField)
+│   ├── EditFieldGeneralTab.tsx  # Aba geral (produtor/logística travados quando isSubField)
+│   ├── EditFieldAgronomicTab.tsx
+│   └── FieldMapModal.tsx     # Modal de mapa do polígono (Leaflet, satélite/OSM, siblings overlay)
 ├── layout/
-│   ├── app-layout.tsx       # Layout principal com sidebar
-│   ├── sidebar.tsx          # Navegação lateral
-│   ├── sidebar-footer.tsx   # Versão e changelog
-│   └── changelog-modal.tsx  # Modal de changelog
+│   ├── app-layout.tsx        # Layout principal com sidebar
+│   ├── sidebar.tsx           # Navegação lateral (Dashboard, Mapa, Logística, Produtores, Caixas)
+│   ├── sidebar-footer.tsx    # Versão e changelog
+│   └── changelog-modal.tsx   # Modal de changelog
 ├── maps/
-│   └── map-drawer.tsx       # Desenho de polígonos (Leaflet Draw)
+│   └── map-drawer.tsx        # Desenho de polígonos (Leaflet Draw)
+├── reports/
+│   ├── AnalysisTabs.tsx     # Abas do relatório (Relatório, Visual, Comparação Subtalhões)
+│   ├── SubfieldsComparisonTab.tsx  # Aba comparativa pai vs filhos (tabela + NDVI overlay)
+│   ├── NdviChartCard.tsx     # Card do gráfico NDVI
+│   └── AIValidationSection.tsx
+├── dashboard/
+│   └── DashboardFilters.tsx  # Filtros do dashboard
+├── settings/
+│   ├── FeatureToggle.tsx     # Toggle de feature flags
+│   ├── GeneralSettingsTab.tsx
+│   ├── ModulesSettingsTab.tsx
+│   ├── CalculationsSettingsTab.tsx
+│   ├── AutomationSettingsTab.tsx
+│   └── ...
 └── ui/
     ├── button.tsx
     ├── card.tsx
     ├── badge.tsx
     └── ...
+```
+
+**Hooks customizados (hooks/):**
+```
+hooks/
+├── useReportData.ts          # Dados do relatório
+├── useProcessingModal.ts     # Modal de processamento
+├── useDashboardFields.ts     # Campos do dashboard
+├── useWorkspaceSettings.ts   # Configurações do workspace
+├── useVisualAnalysisImages.ts# Imagens de análise visual
+└── useLocationSearch.ts      # Busca por localização
 ```
 
 ### 2. API Layer (Route Handlers)
@@ -227,10 +258,12 @@ app/api/
 ├── fields/
 │   ├── route.ts                    # GET (list), POST (create)
 │   └── [id]/
-│       ├── route.ts                # GET, PATCH (edição agronômica), DELETE
+│       ├── route.ts                # GET (incl. subFields geom + parentField), PATCH, DELETE
 │       ├── status/route.ts         # GET (lightweight status check)
-│       ├── process/route.ts        # POST (process, dual phenology)
-│       ├── subfields/route.ts      # GET, POST (subtalhões)
+│       ├── process/route.ts        # POST (process via pipeline, ~99 linhas)
+│       ├── subfields/
+│       │   ├── route.ts            # GET, POST (subtalhões, incl. detected fields)
+│       │   └── comparison/route.ts # GET (dados comparativos pai vs filhos)
 │       ├── images/route.ts         # GET (imagens satélite, URLs S3)
 │       └── analyze/[templateId]/route.ts
 ├── logistics/
@@ -247,7 +280,31 @@ app/api/
     └── fix-status/route.ts         # GET, POST
 ```
 
-### 3. Services Layer (Business Logic)
+### 3. Pipeline de Processamento (lib/services/processing/)
+
+O processamento de talhões (`POST /api/fields/[id]/process`) foi refatorado de ~1248 linhas para um padrão de pipeline orquestrado (~99 linhas na route, lógica em steps):
+
+```
+lib/services/processing/
+├── index.ts           # Barrel exports
+├── types.ts           # PipelineContext, StepResult, PipelineStep
+├── pipeline.ts        # Orchestrator (~60 linhas)
+├── steps/
+│   ├── 01-fetch-ndvi.ts
+│   ├── 02-detect-phenology.ts
+│   ├── 03-crop-pattern.ts
+│   ├── 04-fetch-climate.ts
+│   ├── 05-fetch-radar.ts
+│   ├── 06-fuse-eos.ts
+│   ├── 07-ai-validation.ts
+│   └── 08-persist.ts
+└── helpers/
+    └── status.ts      # Determinação de status final
+```
+
+Cada step recebe `PipelineContext` e retorna `StepResult`. O pipeline executa sequencialmente; falhas em steps críticos interrompem o fluxo.
+
+### 4. Services Layer (Business Logic)
 
 **Responsabilidades:**
 - Lógica de negócio
@@ -257,28 +314,32 @@ app/api/
 
 **Serviços:**
 
-| Serviço | Arquivo | Função |
-|---------|---------|--------|
+| Serviço | Arquivo / Diretório | Função |
+|---------|---------------------|--------|
 | Merx | `merx.service.ts` | Integração com API de satélite |
 | Phenology | `phenology.service.ts` | Detecção de fenologia + EOS dinâmico |
 | EOS Fusion | `eos-fusion.service.ts` | Fusão NDVI + GDD + Balanço Hídrico (single source of truth, sanity check v0.0.33) |
 | Crop Pattern | `crop-pattern.service.ts` | Análise algorítmica de padrão de cultura (8 culturas, 3 categorias) |
 | Thermal | `thermal.service.ts` | Soma térmica (GDD) com backtracking de maturação |
 | Water Balance | `water-balance.service.ts` | Balanço hídrico + ajuste EOS por estresse |
-| Climate Envelope | `climate-envelope.service.ts` | Bandas históricas (Bollinger-like) |
+| Climate Envelope | `climate-envelope/` | Bandas históricas (Bollinger-like): types, api, analysis |
 | Precipitation | `precipitation.service.ts` | Dados de precipitação + ajuste colheita |
-| Cycle Analysis | `cycle-analysis.service.ts` | Projeção adaptativa por fase fenológica |
+| Cycle Analysis | `cycle-analysis/` | Projeção adaptativa por fase fenológica: types, helpers, detection, chart-data |
 | Correlation | `correlation.service.ts` | Correlação histórica robusta |
 | Geometry | `geometry.service.ts` | Validação e cálculo de geometrias |
 | Geocoding | `geocoding.service.ts` | Geocodificação reversa |
 | AI Templates | `ai.service.ts` | Integração com Gemini para análises textuais |
 | AI Validation | `ai-validation.service.ts` | Orquestrador do pipeline de validação visual (Curator→Verifier→Judge) |
 | Field Images | `field-images.service.ts` | Serviço compartilhado de imagens (fetch, S3, incremental) — IA + Visual Analysis |
-| Feature Flags | `feature-flags.service.ts` | Configuração de módulos por workspace (incl. `enableVisualAnalysis`, `enableSubFields`) |
+| Feature Flags | `feature-flags.service.ts` | Configuração de módulos por workspace (incl. `enableVisualAnalysis`, `enableSubFields`, `enableSubFieldComparison`) |
 | Pricing | `pricing.service.ts` | Custos de API (Gemini, Sentinel Hub) |
-| Sentinel-1 | `sentinel1.service.ts` | Integração Radar Copernicus |
-| NDVI Fusion | `ndvi-fusion.service.ts` | Fusão óptico + radar |
+| Sentinel-1 | `sentinel1/` | Integração Radar Copernicus: types, auth, helpers, statistics, api, process |
+| SAR-NDVI Adaptive | `sar-ndvi-adaptive.service.ts` + `sar-ndvi/` | Fusão óptico + radar adaptativa (types, statistics, models, calibration, fusion) |
+| NDVI Fusion | `ndvi-fusion.service.ts` | Fusão óptico + radar (usa sar-ndvi internamente) |
+| RVI Calibration | `rvi-calibration/` | Calibração RVI: types, math, data, calibration |
 | S3 Client | `s3.ts` (lib/) | Upload, download, presigned URLs para armazenamento de imagens em AWS S3 |
+
+**Nota:** Serviços grandes foram divididos em subdiretórios com barrel re-exports (index.ts).
 
 **Agentes IA (lib/agents/):**
 
@@ -293,7 +354,7 @@ app/api/
 | Types | `types.ts` | Interfaces compartilhadas (incl. CropVerification, VerifierAnalysis) |
 | Evalscripts | `evalscripts.ts` | Scripts Sentinel Hub (S2 True Color, S2 NDVI, S1 Radar, Landsat NDVI, S3 NDVI) |
 
-### 4. Data Layer (Persistence)
+### 5. Data Layer (Persistence)
 
 **Tecnologias:** Prisma ORM, PostgreSQL (Neon)
 
@@ -428,24 +489,58 @@ model Analysis {
 }
 ```
 
+### 6. Infraestrutura de Testes (__tests__/)
+
+Testes unitários com Jest + ts-jest. ~110 testes cobrindo serviços de fenologia, fusão EOS, padrão de cultura, térmico e balanço hídrico.
+
+```
+__tests__/
+├── fixtures/              # Dados de teste
+│   ├── ndvi-series.ts     # 8 cenários NDVI (SOJA_NORMAL, NO_CROP, etc.)
+│   ├── temperature-data.ts
+│   ├── precipitation-data.ts
+│   └── geometry.ts
+├── helpers/
+│   └── test-utils.ts
+└── services/
+    ├── setup.test.ts      # Infraestrutura, path aliases, fixtures
+    ├── phenology.test.ts  # ~28 cenários
+    ├── eos-fusion.test.ts # ~22 cenários
+    ├── crop-pattern.test.ts # ~20 cenários
+    ├── thermal.test.ts    # ~18 cenários
+    └── water-balance.test.ts # ~17 cenários
+```
+
+### 7. Utilitários e Tipos (lib/utils/, lib/types/)
+
+**lib/utils/** — Utilitários compartilhados:
+- `report-chart-utils.ts` — Helpers para gráficos de relatório
+- `date-utils.ts` — Formatação e parsing de datas (formatDateForInput, parseDateBRToISO, isValidDateBR)
+
+**lib/types/** — Tipos compartilhados:
+- `settings.ts` — Tipos de configuração do workspace
+
 ---
 
 ## Fluxos Principais
 
 ### Fluxo de Processamento de Talhão
 
+O processamento é orquestrado pelo pipeline (`lib/services/processing/`). A route `process/route.ts` delega para `runPipeline()`.
+
 ```
-┌──────────┐     ┌──────────┐     ┌──────────┐     ┌──────────┐
-│  Create  │────▶│  Fetch   │────▶│ Calculate│────▶│  Save    │
-│  Field   │     │ Merx API │     │ Phenology│     │ AgroData │
-└──────────┘     └──────────┘     └──────────┘     └──────────┘
-     │                                                   │
-     │           PENDING ──▶ PROCESSING ──▶ SUCCESS      │
-     │                              │                    │
-     │                              ▼                    │
-     │                         PARTIAL (se incompleto)   │
-     │                         ERROR (se falhar)         │
-     └───────────────────────────────────────────────────┘
+┌──────────┐     ┌──────────────────────────────────────┐     ┌──────────┐
+│  Create  │────▶│  Pipeline (8 steps)                  │────▶│  Save    │
+│  Field   │     │  01-NDVI → 02-Phenology → 03-Pattern │     │ AgroData │
+└──────────┘     │  → 04-Climate → 05-Radar → 06-Fuse   │     └──────────┘
+     │           │  → 07-AI Validation → 08-Persist     │           │
+     │           └──────────────────────────────────────┘           │
+     │           PENDING ──▶ PROCESSING ──▶ SUCCESS                 │
+     │                              │                               │
+     │                              ▼                               │
+     │                         PARTIAL (se incompleto)              │
+     │                         ERROR (se falhar)                    │
+     └─────────────────────────────────────────────────────────────┘
 ```
 
 ### Fluxo de Dados EOS (Single Source of Truth - v0.0.30, sanity check v0.0.33)
@@ -467,7 +562,7 @@ model Analysis {
 │    ↕ NO_CROP/MISMATCH → short-circuit (EOS não calculado)       │
 │    ↕ ATYPICAL → ciclo indefinido ou baixa amplitude             │
 │                                                                  │
-│  process/route.ts                                                │
+│  process/route.ts (pipeline: steps 01–08)                        │
 │    ├── persiste em agroData.eosDate (NDVI bruto)                │
 │    ├── persiste em rawAreaData.fusedEos (objeto completo)       │
 │    └── salva fusedEosPassed (boolean)                           │
@@ -521,6 +616,16 @@ model Analysis {
                      │  after)      │     └──────────────┘     └──────────────┘
                      └──────────────┘
 ```
+
+### Relatório do Talhão (v0.0.36)
+
+A página de relatório (`reports/[id]/page.tsx`) suporta tanto talhões pai quanto subtalhões:
+
+**Funcionalidades v0.0.36:**
+- **Breadcrumb de navegação**: Subtalhões exibem breadcrumb `[PaiName] / [FilhoName]` no header, com link clicável para o relatório do pai. `router.back()` preserva histórico de navegação
+- **Mapa com polígonos filhos**: `FieldMapModal` recebe prop `siblings` com geometrias dos subtalhões, renderizados como polígonos coloridos com tooltips
+- **Aba de comparação**: Quando habilitado (`enableSubFieldComparison`), talhões pai com subtalhões exibem aba extra com tabela comparativa (área, volume, confiança, NDVI peak, SOS, EOS, cultura) e gráfico NDVI overlay
+- **API**: `GET /api/fields/[id]` agora inclui `subFields` (id, name, geometryJson) e `parentField` (id, name) no response
 
 ### Fluxo de Diagnóstico Logístico
 

@@ -5,7 +5,13 @@ import { validateGeometry } from '@/lib/services/geometry.service'
 import { reverseGeocode } from '@/lib/services/geocoding.service'
 import { isFeatureEnabled } from '@/lib/services/feature-flags.service'
 import booleanContains from '@turf/boolean-contains'
-import { polygon as turfPolygon } from '@turf/helpers'
+import buffer from '@turf/buffer'
+import { polygon as turfPolygon, multiPolygon as turfMultiPolygon } from '@turf/helpers'
+
+// Tolerância em metros para compensar imprecisão de desenho no mapa.
+// 20m é suficiente para cobrir imprecisão de clique/toque sem permitir
+// subtalhões significativamente fora do pai.
+const CONTAINMENT_BUFFER_METERS = 20
 
 interface RouteParams {
   params: { id: string }
@@ -58,6 +64,10 @@ export async function GET(
             cropPatternStatus: true,
             phenologyHealth: true,
             peakNdvi: true,
+            // Detected fields (para referência no modal de edição)
+            detectedPlantingDate: true,
+            detectedCropType: true,
+            detectedConfidence: true,
           }
         }
       }
@@ -158,30 +168,26 @@ export async function POST(
     try {
       const parentGeojson = JSON.parse(parentField.geometryJson)
       const childGeojson = typeof geometryJson === 'string' ? JSON.parse(geometryJson) : geometryJson
-      
-      // Extrair coordenadas dos polígonos
-      const parentCoords = parentGeojson.features?.[0]?.geometry?.coordinates || 
-                           parentGeojson.geometry?.coordinates ||
-                           parentGeojson.coordinates
-      const childCoords = childGeojson.features?.[0]?.geometry?.coordinates ||
-                          childGeojson.geometry?.coordinates ||
-                          childGeojson.coordinates
 
-      if (!parentCoords || !childCoords) {
-        return NextResponse.json(
-          { error: 'Não foi possível extrair coordenadas dos polígonos' },
-          { status: 400 }
+      const parentFeature = extractTurfFeature(parentGeojson)
+      const childFeature = extractTurfFeature(childGeojson)
+
+      if (!parentFeature || !childFeature) {
+        // Geometria degenerada no banco — não bloquear criação, mas logar
+        console.warn(
+          `Geometry containment check skipped for field ${params.id}: ` +
+          `parent=${!!parentFeature}, child=${!!childFeature}`
         )
-      }
+      } else {
+        // Aplicar buffer de tolerância ao pai para compensar imprecisão de desenho
+        const bufferedParent = buffer(parentFeature, CONTAINMENT_BUFFER_METERS, { units: 'meters' })
 
-      const parentPoly = turfPolygon(parentCoords)
-      const childPoly = turfPolygon(childCoords)
-
-      if (!booleanContains(parentPoly, childPoly)) {
-        return NextResponse.json(
-          { error: 'O subtalhão deve estar completamente dentro do polígono pai' },
-          { status: 400 }
-        )
+        if (bufferedParent && !booleanContains(bufferedParent, childFeature)) {
+          return NextResponse.json(
+            { error: 'O subtalhão deve estar dentro do polígono pai' },
+            { status: 400 }
+          )
+        }
       }
     } catch (geoError) {
       console.error('Geometry containment check error:', geoError)
@@ -233,4 +239,62 @@ export async function POST(
       { status: 500 }
     )
   }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers de geometria para containment check
+// ---------------------------------------------------------------------------
+
+/**
+ * Extrai um Feature turf válido de um GeoJSON arbitrário.
+ * Suporta FeatureCollection, Feature, Polygon e MultiPolygon.
+ * Fecha anéis não-fechados e valida que cada anel tem >= 4 posições.
+ * Retorna null se a geometria for inválida ou degenerada.
+ */
+function extractTurfFeature(geojson: any) {
+  const geometry =
+    geojson?.features?.[0]?.geometry ||
+    geojson?.geometry ||
+    (geojson?.type === 'Polygon' || geojson?.type === 'MultiPolygon'
+      ? geojson
+      : null)
+
+  if (!geometry?.type || !geometry?.coordinates) return null
+
+  // Deep-clone para não mutar o original ao fechar anéis
+  const coords = JSON.parse(JSON.stringify(geometry.coordinates))
+
+  if (geometry.type === 'Polygon') {
+    for (const ring of coords) {
+      if (!closeAndValidateRing(ring)) return null
+    }
+    return turfPolygon(coords)
+  }
+
+  if (geometry.type === 'MultiPolygon') {
+    for (const polygon of coords) {
+      for (const ring of polygon) {
+        if (!closeAndValidateRing(ring)) return null
+      }
+    }
+    return turfMultiPolygon(coords)
+  }
+
+  return null
+}
+
+/**
+ * Fecha o anel se não estiver fechado e valida >= 4 posições.
+ * Modifica o array in-place.
+ */
+function closeAndValidateRing(ring: number[][]): boolean {
+  if (!Array.isArray(ring) || ring.length < 3) return false
+
+  const first = ring[0]
+  const last = ring[ring.length - 1]
+  if (first[0] !== last[0] || first[1] !== last[1]) {
+    ring.push([first[0], first[1]])
+  }
+
+  return ring.length >= 4
 }

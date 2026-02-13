@@ -1038,12 +1038,23 @@ Todas as rotas internas ficam em `app/api/` e seguem o padrao Next.js App Router
 |----------|-------|
 | **Arquivo** | `app/api/fields/[id]/route.ts` |
 | **Auth** | Cookie JWT |
-| **Proposito** | Dados completos do talhao (agro, NDVI, ciclo, colheita, ZARC) |
+| **Proposito** | Dados completos do talhao (agro, NDVI, ciclo, colheita, ZARC, subtalhões, pai) |
 
 **Response:**
 ```json
 {
-  "field": { "id": "...", "name": "...", "agroData": { ... }, "ndviData": [...], "analyses": [...] },
+  "field": {
+    "id": "...", "name": "...",
+    "agroData": { ... },
+    "ndviData": [...],
+    "analyses": [...],
+    "_count": { "subFields": 2 },
+    "subFields": [
+      { "id": "...", "name": "Talhão 1", "geometryJson": "{...}" },
+      { "id": "...", "name": "Talhão 2", "geometryJson": "{...}" }
+    ],
+    "parentField": { "id": "...", "name": "Fazenda Roseira" }
+  },
   "historicalNdvi": [...],
   "cycleAnalysis": { ... },
   "correlationDetails": { ... },
@@ -1053,6 +1064,8 @@ Todas as rotas internas ficam em `app/api/` e seguem o padrao Next.js App Router
   "fusedEos": { ... }
 }
 ```
+
+> **Nota (v0.0.36):** O campo `subFields` retorna id, name e geometryJson de cada subtalhão (para exibição no mapa do relatório). O campo `parentField` retorna id e name do talhão pai (para breadcrumb no relatório do subtalhão). Ambos são `null`/vazio quando não aplicável.
 
 ---
 
@@ -1067,6 +1080,8 @@ Todas as rotas internas ficam em `app/api/` e seguem o padrao Next.js App Router
 ```json
 { "name": "Novo Nome", "producerId": "cmli...", "logisticsUnitId": "cmli..." }
 ```
+
+> **Nota (v0.0.36):** Para subtalhões, o frontend omite `producerId` e `logisticsUnitId` do payload (herdados do pai). Os demais campos (nome, cultura, dados agronômicos) funcionam normalmente. Dados detectados (`detectedPlantingDate`, `detectedCropType`, `detectedConfidence`) são preservados no reprocessamento.
 
 ---
 
@@ -1182,14 +1197,14 @@ Todas as rotas internas ficam em `app/api/` e seguem o padrao Next.js App Router
 
 ---
 
-#### GET /api/fields/[id]/subfields (v0.0.34)
+#### GET /api/fields/[id]/subfields (v0.0.34, atualizado v0.0.36)
 
 | Atributo | Valor |
 |----------|-------|
 | **Arquivo** | `app/api/fields/[id]/subfields/route.ts` |
 | **Auth** | Cookie JWT |
 | **Feature Flag** | `enableSubFields` |
-| **Proposito** | Listar talhao pai e seus subtalhoes |
+| **Proposito** | Listar talhao pai e seus subtalhoes (com dados agronômicos expandidos) |
 
 **Response:**
 ```json
@@ -1197,11 +1212,22 @@ Todas as rotas internas ficam em `app/api/` e seguem o padrao Next.js App Router
   "parentField": {
     "id": "...", "name": "Fazenda Roseira", "geometryJson": "...", "cropType": "SOJA",
     "subFields": [
-      { "id": "...", "name": "Talhão 1", "geometryJson": "...", "cropType": "SOJA", "status": "PENDING" }
+      {
+        "id": "...", "name": "Talhão 1", "geometryJson": "...", "cropType": "SOJA", "status": "PENDING",
+        "plantingDateInput": "2025-11-15", "seasonStartDate": "2025-10-01", "editHistory": "[...]",
+        "agroData": {
+          "areaHa": 50.2, "volumeEstimatedKg": 175700, "confidence": "MEDIUM",
+          "confidenceScore": 62, "eosDate": "2026-03-15", "sosDate": "2025-12-01",
+          "cropPatternStatus": "CONFIRMED", "phenologyHealth": "NORMAL", "peakNdvi": 0.85,
+          "detectedPlantingDate": "2025-11-10", "detectedCropType": "SOJA", "detectedConfidence": "HIGH"
+        }
+      }
     ]
   }
 }
 ```
+
+> **Nota (v0.0.36):** O `agroData` dos subtalhões agora inclui campos `detectedPlantingDate`, `detectedCropType` e `detectedConfidence` para referência no modal de edição (valores auto-gerados preservados). Campos `plantingDateInput`, `seasonStartDate` e `editHistory` também são retornados diretamente no subtalhão.
 
 ---
 
@@ -1224,13 +1250,42 @@ Todas as rotas internas ficam em `app/api/` e seguem o padrao Next.js App Router
 ```
 
 **Validacao:**
-- Geometria do subtalhao deve estar contida no poligono pai (`@turf/boolean-contains`)
+- Geometria do subtalhao deve estar contida no poligono pai (`@turf/boolean-contains` com buffer de 20m)
 - Nome automatico se nao fornecido (Talhao 1, Talhao 2...)
 - Herda propriedades do pai (workspace, producer, seasonStart)
 
 **Response:**
 ```json
 { "success": true, "field": { "id": "...", "name": "Talhão Sul", "parentFieldId": "..." } }
+```
+
+---
+
+#### GET /api/fields/[id]/subfields/comparison (v0.0.35)
+
+| Atributo | Valor |
+|----------|-------|
+| **Arquivo** | `app/api/fields/[id]/subfields/comparison/route.ts` |
+| **Auth** | Cookie JWT |
+| **Feature Flag** | `enableSubFieldComparison` |
+| **Proposito** | Dados comparativos pai vs subtalhões para aba de comparação no relatório |
+
+**Response:**
+```json
+{
+  "parent": {
+    "id": "...", "name": "Fazenda Roseira",
+    "agroData": { "areaHa": 250, "volumeEstimatedKg": 875000, "peakNdvi": 0.82, ... },
+    "ndviTimeSeries": [{ "date": "2025-10-15", "ndvi": 0.35 }, ...]
+  },
+  "subFields": [
+    {
+      "id": "...", "name": "Talhão 1",
+      "agroData": { "areaHa": 50, "volumeEstimatedKg": 175000, "peakNdvi": 0.85, ... },
+      "ndviTimeSeries": [{ "date": "2025-10-15", "ndvi": 0.38 }, ...]
+    }
+  ]
+}
 ```
 
 ---

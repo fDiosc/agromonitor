@@ -37,6 +37,15 @@ export async function GET(
         ndviData: {
           orderBy: { date: 'asc' },
           where: { isHistorical: false }
+        },
+        _count: {
+          select: { subFields: true }
+        },
+        subFields: {
+          select: { id: true, name: true, geometryJson: true }
+        },
+        parentField: {
+          select: { id: true, name: true }
         }
       }
     })

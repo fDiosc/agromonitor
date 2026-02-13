@@ -144,15 +144,19 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    // Estatísticas
+    // Excluir pais com subtalhões das estatísticas para evitar contagem dupla
+    // (mantém todos na lista fieldCoverages para visualização no mapa)
+    const countableFields = fieldCoverages.filter(f => (f.subFieldCount ?? 0) === 0)
+
+    // Estatísticas (baseadas apenas em fields sem subtalhões)
     const stats = {
-      totalFields: fieldCoverages.length,
-      fieldsWithDirectAssignment: fieldCoverages.filter(f => f.assignmentType === 'direct').length,
-      fieldsWithInheritedAssignment: fieldCoverages.filter(f => f.assignmentType === 'inherited').length,
-      fieldsWithAutomaticAssignment: fieldCoverages.filter(f => f.assignmentType === 'automatic').length,
-      fieldsWithNoAssignment: fieldCoverages.filter(f => f.assignmentType === 'none').length,
-      fieldsWithIntersection: fieldCoverages.filter(f => f.hasIntersection).length,
-      fieldsOutsideAllCoverage: fieldCoverages.filter(f => f.coveringUnits.length === 0).length
+      totalFields: countableFields.length,
+      fieldsWithDirectAssignment: countableFields.filter(f => f.assignmentType === 'direct').length,
+      fieldsWithInheritedAssignment: countableFields.filter(f => f.assignmentType === 'inherited').length,
+      fieldsWithAutomaticAssignment: countableFields.filter(f => f.assignmentType === 'automatic').length,
+      fieldsWithNoAssignment: countableFields.filter(f => f.assignmentType === 'none').length,
+      fieldsWithIntersection: countableFields.filter(f => f.hasIntersection).length,
+      fieldsOutsideAllCoverage: countableFields.filter(f => f.coveringUnits.length === 0).length
     }
 
     // Agrupar por caixa logística
@@ -176,7 +180,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    for (const coverage of fieldCoverages) {
+    // Usar apenas fields contáveis (sem subtalhões) para agregação por unidade
+    for (const coverage of countableFields) {
       if (coverage.assignedUnitId && byUnit[coverage.assignedUnitId]) {
         byUnit[coverage.assignedUnitId].totalFields++
         byUnit[coverage.assignedUnitId].totalAreaHa += coverage.areaHa || 0

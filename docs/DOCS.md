@@ -8,9 +8,9 @@
 
 | Document | Description | Status |
 |----------|-------------|--------|
-| [README.md](../README.md) | Visão geral do projeto, quick start e estrutura | ✅ Atualizado (v0.0.34) |
-| [CHANGELOG.md](../CHANGELOG.md) | Histórico de mudanças por versão | ✅ Atualizado (v0.0.34) |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Arquitetura do sistema, fluxos e integrações | ✅ Atualizado (v0.0.34) |
+| [README.md](../README.md) | Visão geral do projeto, quick start e estrutura | ✅ Atualizado (v0.0.36) |
+| [CHANGELOG.md](../CHANGELOG.md) | Histórico de mudanças por versão | ✅ Atualizado (v0.0.36) |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Arquitetura do sistema, fluxos e integrações | ✅ Atualizado (v0.0.36) |
 | [METHODOLOGY.md](./METHODOLOGY.md) | Metodologia unificada de análise agrícola | ✅ Atualizado (v0.0.33) |
 | [DIAGNOSTICOLOG.md](./DIAGNOSTICOLOG.md) | Especificação do módulo de diagnóstico logístico | ✅ Atualizado |
 | [DEPLOY.md](./DEPLOY.md) | Guia de deploy no CapRover | ✅ Atualizado (v0.0.34) |
@@ -21,7 +21,7 @@
 
 | Document | Description | Status |
 |----------|-------------|--------|
-| [Apisproject.md](./Apisproject.md) | Documentação completa de APIs (externas + internas, incl. S3) | ✅ Atualizado (v0.0.34) |
+| [Apisproject.md](./Apisproject.md) | Documentação completa de APIs (externas + internas, incl. S3) | ✅ Atualizado (v0.0.36) |
 | [SCIENTIFIC-COMPLIANCE.md](./SCIENTIFIC-COMPLIANCE.md) | Compliance científica dos algoritmos agronômicos | ✅ Atualizado (v0.0.33) |
 | [REPORT-MERX-NDVI-GAP.md](./REPORT-MERX-NDVI-GAP.md) | Relatório técnico sobre gap de dados NDVI | ✅ Concluído |
 
@@ -78,7 +78,7 @@ These are historical planning documents that have been fully implemented. They a
 
 1. [ARCHITECTURE.md](./ARCHITECTURE.md) - Fluxo de Análise Visual, integração S3
 2. [Apisproject.md](./Apisproject.md) - Seção 1.7 (AWS S3) + endpoints `subfields`, `images`, `PATCH fields`
-3. [CHANGELOG.md](../CHANGELOG.md) - Versão 0.0.34
+3. [CHANGELOG.md](../CHANGELOG.md) - Versões 0.0.34 a 0.0.36
 
 ### Para Deploy
 

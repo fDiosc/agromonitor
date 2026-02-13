@@ -22,23 +22,65 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.36] - 2026-02-13
+
+### Edição de Subtalhões, Mapa com Polígonos Filhos e Breadcrumb de Navegação
+
+Habilita edição completa de subtalhões (nome, cultura, dados agronômicos) com produtor e caixa logística herdados do pai (travados). Exibe polígonos dos filhos no mapa do pai e adiciona breadcrumb de navegação no relatório de subtalhões.
+
+#### Adicionado
+
+- **Edição de Subtalhões**: Modal `EditFieldModal` com prop `isSubField` que trava campos `Produtor Vinculado` e `Caixa Logística` como "Herdado do talhão pai". Título muda para "Editar Subtalhão". Payload PATCH omite campos herdados
+- **Botão Editar no Dashboard**: Ícone Pencil adicionado para linhas filhas (`isChild`) no `FieldRowCells.tsx`, usando o callback `onEdit` existente
+- **Botão Editar na Página de Subtalhões**: Ícone Leaf na sidebar de cada subtalhão abre modal completo com `isSubField=true`. Passa arrays vazios para producers/logisticsUnits (campos travados)
+- **Dados Detectados no Modal**: API `GET /api/fields/[id]/subfields` estendida para retornar `detectedPlantingDate`, `detectedCropType`, `detectedConfidence` no agroData. Modal exibe valores auto-detectados como referência na aba Agronômico
+- **Polígonos dos Filhos no Mapa do Pai**: `GET /api/fields/[id]` agora inclui `subFields: { id, name, geometryJson }`. Página de relatório passa como `siblings` ao `FieldMapModal` (que já suportava a prop). Cada subtalhão aparece com cor distinta e tooltip
+- **Breadcrumb de Navegação**: Relatório de subtalhão exibe breadcrumb `[FolderOpen] NomeDoPai / NomeDoFilho` com link clicável para `/reports/[parentId]`. `router.back()` preserva histórico de navegação
+- **API Estendida**: `GET /api/fields/[id]` inclui `parentField: { id, name }` para identificação de subtalhões
+
+#### Removido
+
+- **Item "Relatórios" na Sidebar**: Removido do menu lateral (`sidebar.tsx`) pois `/reports` não é uma rota válida — relatórios individuais são acessados via `/reports/[id]` pelo botão "Ver relatório" no dashboard
+
+#### Alterado
+
+- **`components/fields/FieldRowCells.tsx`**: Botão Pencil (Editar) adicionado no bloco `isChild` antes de Reprocessar
+- **`components/modals/EditFieldModal.tsx`**: Nova prop `isSubField?: boolean` controla título, payload e detecção de mudanças
+- **`components/modals/EditFieldGeneralTab.tsx`**: Nova prop `isSubField?: boolean` desabilita selects de produtor e caixa logística com visual `bg-slate-50 cursor-not-allowed` e texto "Herdado do talhão pai"
+- **`app/(authenticated)/page.tsx`**: Passa `isSubField={!!editingField?.parentFieldId}` ao EditFieldModal
+- **`app/(authenticated)/fields/[id]/subfields/page.tsx`**: Integra EditFieldModal com estados `showEditModal`/`editingSubField`. Interface SubField estendida com campos agronômicos e detectados
+- **`app/api/fields/[id]/subfields/route.ts`**: GET inclui 3 campos detectados adicionais no select do agroData
+- **`app/api/fields/[id]/route.ts`**: GET inclui `subFields` (geometrias), `parentField` (id, nome) no include do Prisma
+- **`app/(authenticated)/reports/[id]/page.tsx`**: FieldMapModal recebe `siblings` quando talhão tem filhos. Breadcrumb com FolderOpen e Link para relatório do pai
+
+---
+
 ## [0.0.35] - 2026-02-13
 
-### Visão Folder de Subtalhões no Dashboard, Pesquisa e Filtros
+### Visão Folder, Filtros Persistentes, Comparação, Edição de Polígonos e Logística
 
-Implementação da visualização hierárquica de subtalhões no dashboard com padrão folder (expand/collapse), pesquisa textual por nome/produtor/cidade, e filtro por presença de subtalhões.
+Implementação da visualização hierárquica de subtalhões no dashboard com padrão folder (expand/collapse), persistência de filtros na URL, aba comparativa pai vs filhos, edição de polígonos pós-desenho, buffer de validação geométrica, remoção de reprocessamento do pai, e correção de contagem dupla na logística.
 
 #### Adicionado
 
 - **Visão Folder de Subtalhões**: Talhões pai com subtalhões exibem ícone `FolderOpen` clicável com chevron de expand/collapse. Ao expandir, subtalhões aparecem como linhas indentadas (`└`) com background azulado (`bg-blue-50/40`), ícone `SquareSplitVertical`, nome do pai como referência, e ações independentes (reprocessar, ver relatório, excluir). Badge "N sub" visível quando recolhido
 - **Pesquisa Textual no Dashboard**: Campo de busca que filtra por nome do talhão, nome do produtor e cidade. Input com ícone `Search`, botão de limpar (`X`) e placeholder descritivo
 - **Filtro de Subtalhões**: Filtro toggle "Subtalhões: Todos | Sim | Não" condicional ao feature flag `enableSubFields`. Permite isolar talhões que possuem ou não subtalhões cadastrados
+- **Persistência de Filtros na URL**: Todos os filtros do dashboard (status, tipo, caixa logística, colheita, confiança, cultura, IA, resultado IA, pesquisa, subtalhões) são sincronizados via URL search params. Filtros persistem ao navegar e retornar ao dashboard. Botão "Limpar filtros" reseta URL
+- **Aba Comparativa Pai vs Filhos**: Nova aba no relatório do talhão pai (`SubfieldsComparisonTab`) com tabela comparativa de dados (área, volume, confiança, NDVI peak, SOS, EOS, cultura) e gráfico NDVI overlay (pai + filhos). Habilitável via feature flag `enableSubFieldComparison` (filho de `enableSubFields`)
+- **API de Comparação**: Novo endpoint `GET /api/fields/[id]/subfields/comparison` retorna dados agronômicos e séries NDVI do pai e filhos para a aba comparativa
+- **Edição de Polígonos**: Após desenhar um polígono no mapa de subtalhões, o usuário pode arrastar vértices para ajustar antes de salvar. Para subtalhões existentes, botão "Editar Geometria" habilita edição de vértices com persistência via API
+- **Buffer de Validação Geométrica**: Constante `CONTAINMENT_BUFFER_METERS = 20` aplica buffer de 20 metros ao polígono pai na validação de contenção (`@turf/boolean-contains` + `@turf/buffer`), acomodando imprecisão no desenho manual
+- **Remoção do Reprocessamento do Pai**: Ícone de reprocessamento não aparece mais para talhões pai que possuem subtalhões (processamento deve ser feito individualmente nos filhos)
 
 #### Alterado
 
 - **`app/api/fields/route.ts`**: GET agora inclui `subFields` completos (com agroData) inline no response de cada campo pai. Lógica de processamento de `agroData` extraída para função reutilizável `processAgroData()` aplicada tanto ao pai quanto aos filhos
 - **`components/fields/field-table.tsx`**: Refatorado de render inline para componentes `FieldRows` (pai + filhos) e `FieldRowCells` (linha individual). Adicionado estado `expandedParents` com `Set<string>`. Subtalhões herdam todas as colunas de dados (status, área, volume, emergência, colheita, confiança, cultura, crop pattern, IA)
-- **`app/(authenticated)/page.tsx`**: Adicionados estados `searchQuery` e `subFieldFilter`. `filteredFields` agora aplica pesquisa textual (nome, produtor, cidade) e filtro de subtalhões antes dos filtros existentes. `clearFilters` e `hasActiveFilters` atualizados. `handleDelete` e `handleReprocess` atualizados para operar em subtalhões aninhados no state local
+- **`app/(authenticated)/page.tsx`**: Filtros migrados de `useState` para URL search params (`useSearchParams` + `useRouter`). Adicionados estados `searchQuery` e `subFieldFilter`. `clearFilters` reseta todos os filtros e limpa URL
+- **`app/api/fields/[id]/subfields/route.ts`**: Helper `extractTurfFeature` para normalização de geometrias GeoJSON (Polygon, MultiPolygon, FeatureCollection). Buffer de 20m na validação de contenção
+- **`components/maps/SubFieldMap.tsx`**: Suporte a edição de vértices pós-desenho e para subtalhões existentes. Null checks defensivos para `editableGroupRef.current`
+- **`app/api/logistics/diagnostic/route.ts`**: Filtro que exclui talhões pai com subtalhões da agregação para evitar contagem dupla de volume/área na logística
 
 ---
 

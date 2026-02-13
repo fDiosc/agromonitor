@@ -15,6 +15,12 @@ interface SubFieldMapProps {
   onSelect: (id: string | null) => void
   isDrawing: boolean
   onDrawComplete: (geometryJson: string) => void
+  /** ID do subtalhão sendo editado (arraste de vértices) */
+  editingId?: string | null
+  /** Callback quando edição de geometria é confirmada */
+  onEditComplete?: (id: string, geometryJson: string) => void
+  /** Callback quando edição é cancelada */
+  onEditCancel?: () => void
 }
 
 // Cores para subtalhões
@@ -29,7 +35,10 @@ export default function SubFieldMap({
   selectedId,
   onSelect,
   isDrawing,
-  onDrawComplete
+  onDrawComplete,
+  editingId = null,
+  onEditComplete,
+  onEditCancel,
 }: SubFieldMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<any>(null)
@@ -37,16 +46,26 @@ export default function SubFieldMap({
   const parentLayerRef = useRef<any>(null)
   const subLayersRef = useRef<Record<string, any>>({})
   const drawControlRef = useRef<any>(null)
+  const editableGroupRef = useRef<any>(null)
   const isInitializedRef = useRef(false)
   const [mapReady, setMapReady] = useState(false)
+  // Polígono recém-desenhado aguardando confirmação (com edição de vértices)
+  const [pendingDraw, setPendingDraw] = useState(false)
+  const pendingLayerRef = useRef<any>(null)
 
   // Keep callbacks in refs to avoid stale closures
   const onSelectRef = useRef(onSelect)
   const onDrawCompleteRef = useRef(onDrawComplete)
+  const onEditCompleteRef = useRef(onEditComplete)
+  const onEditCancelRef = useRef(onEditCancel)
   const selectedIdRef = useRef(selectedId)
+  const editingIdRef = useRef(editingId)
   useEffect(() => { onSelectRef.current = onSelect }, [onSelect])
   useEffect(() => { onDrawCompleteRef.current = onDrawComplete }, [onDrawComplete])
+  useEffect(() => { onEditCompleteRef.current = onEditComplete }, [onEditComplete])
+  useEffect(() => { onEditCancelRef.current = onEditCancel }, [onEditCancel])
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+  useEffect(() => { editingIdRef.current = editingId }, [editingId])
 
   // Initialize map once on mount
   useEffect(() => {
@@ -108,6 +127,11 @@ export default function SubFieldMap({
 
     return () => {
       mounted = false
+      // Limpar layers editáveis antes de destruir o mapa
+      if (editableGroupRef.current) {
+        editableGroupRef.current = null
+      }
+      pendingLayerRef.current = null
       if (mapRef.current) {
         mapRef.current.remove()
         mapRef.current = null
@@ -216,7 +240,13 @@ export default function SubFieldMap({
     const map = mapRef.current
     if (!L || !map) return
 
-    if (isDrawing) {
+    if (isDrawing && !pendingDraw) {
+      // Criar FeatureGroup editável se ainda não existe
+      if (!editableGroupRef.current) {
+        editableGroupRef.current = new L.FeatureGroup()
+        map.addLayer(editableGroupRef.current)
+      }
+
       // Add draw control
       const drawControl = new L.Control.Draw({
         draw: {
@@ -240,17 +270,30 @@ export default function SubFieldMap({
       map.addControl(drawControl)
       drawControlRef.current = drawControl
 
-      // Listen for draw:created
+      // Ao finalizar desenho: manter no mapa com vértices editáveis
       const handleCreated = (e: any) => {
         const layer = e.layer
-        const geojson = layer.toGeoJSON()
 
-        const featureCollection = {
-          type: 'FeatureCollection',
-          features: [geojson]
+        // Remover draw control (desenho único)
+        if (drawControlRef.current) {
+          map.removeControl(drawControlRef.current)
+          drawControlRef.current = null
         }
 
-        onDrawCompleteRef.current(JSON.stringify(featureCollection))
+        // Garantir que o grupo editável existe (defensive)
+        if (!editableGroupRef.current) {
+          editableGroupRef.current = new L.FeatureGroup()
+          map.addLayer(editableGroupRef.current)
+        }
+
+        // Adicionar ao grupo editável
+        editableGroupRef.current.addLayer(layer)
+        pendingLayerRef.current = layer
+
+        // Habilitar edição de vértices
+        layer.editing.enable()
+
+        setPendingDraw(true)
       }
 
       map.on(L.Draw.Event.CREATED, handleCreated)
@@ -262,19 +305,154 @@ export default function SubFieldMap({
           drawControlRef.current = null
         }
       }
-    } else {
+    } else if (!isDrawing) {
+      // Limpar tudo ao sair do modo desenho
       if (drawControlRef.current && map) {
         map.removeControl(drawControlRef.current)
         drawControlRef.current = null
       }
+      cleanupEditable()
     }
-  }, [isDrawing, mapReady])
+  }, [isDrawing, mapReady, pendingDraw])
+
+  // Handle editing existing subfield
+  useEffect(() => {
+    if (!mapReady) return
+    const L = leafletRef.current
+    const map = mapRef.current
+    if (!L || !map) return
+
+    // Limpar edição anterior
+    cleanupEditable()
+
+    if (!editingId) return
+
+    // Encontrar o subfield para editar
+    const sf = subFields.find(s => s.id === editingId)
+    if (!sf) return
+
+    try {
+      const geojson = JSON.parse(sf.geometryJson)
+
+      // Criar FeatureGroup editável
+      editableGroupRef.current = new L.FeatureGroup()
+      map.addLayer(editableGroupRef.current)
+
+      const editLayer = L.geoJSON(geojson, {
+        style: {
+          color: '#f59e0b',
+          weight: 3,
+          fillOpacity: 0.3,
+          fillColor: '#f59e0b',
+          dashArray: '4,4',
+        }
+      })
+
+      // Adicionar cada layer individual ao grupo (para edição funcionar)
+      editLayer.eachLayer((layer: any) => {
+        if (editableGroupRef.current) {
+          editableGroupRef.current.addLayer(layer)
+          pendingLayerRef.current = layer
+          layer.editing.enable()
+        }
+      })
+
+      // Esconder o layer original do subfield
+      if (subLayersRef.current[editingId]) {
+        map.removeLayer(subLayersRef.current[editingId])
+      }
+    } catch (err) {
+      console.error('[SubFieldMap] Error setting up edit mode:', err)
+    }
+  }, [editingId, mapReady, subFields])
+
+  /** Confirmar desenho pendente (novo polígono) */
+  const handleConfirmDraw = () => {
+    if (!pendingLayerRef.current) return
+
+    const geojson = pendingLayerRef.current.toGeoJSON()
+    const featureCollection = {
+      type: 'FeatureCollection',
+      features: [geojson]
+    }
+
+    cleanupEditable()
+    setPendingDraw(false)
+    onDrawCompleteRef.current(JSON.stringify(featureCollection))
+  }
+
+  /** Cancelar desenho pendente */
+  const handleCancelDraw = () => {
+    cleanupEditable()
+    setPendingDraw(false)
+  }
+
+  /** Confirmar edição de subfield existente */
+  const handleConfirmEdit = () => {
+    if (!pendingLayerRef.current || !editingIdRef.current) return
+
+    const geojson = pendingLayerRef.current.toGeoJSON()
+    const featureCollection = {
+      type: 'FeatureCollection',
+      features: [geojson]
+    }
+
+    const id = editingIdRef.current
+    cleanupEditable()
+    onEditCompleteRef.current?.(id, JSON.stringify(featureCollection))
+  }
+
+  /** Cancelar edição de subfield existente */
+  const handleCancelEdit = () => {
+    cleanupEditable()
+    onEditCancelRef.current?.()
+  }
+
+  /** Limpar layers editáveis */
+  function cleanupEditable() {
+    const map = mapRef.current
+    if (editableGroupRef.current && map) {
+      editableGroupRef.current.eachLayer((layer: any) => {
+        if (layer.editing) layer.editing.disable()
+      })
+      map.removeLayer(editableGroupRef.current)
+      editableGroupRef.current = null
+    }
+    pendingLayerRef.current = null
+  }
+
+  const showOverlay = pendingDraw || !!editingId
 
   return (
-    <div
-      ref={mapContainerRef}
-      className="w-full"
-      style={{ zIndex: 0, height: '500px' }}
-    />
+    <div className="relative">
+      <div
+        ref={mapContainerRef}
+        className="w-full"
+        style={{ zIndex: 0, height: '500px' }}
+      />
+
+      {/* Overlay de confirmação: vértices editáveis */}
+      {showOverlay && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-2 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border px-4 py-2">
+          <span className="text-sm font-medium text-slate-700">
+            {pendingDraw
+              ? 'Ajuste os vértices e confirme'
+              : 'Arraste os vértices para ajustar'}
+          </span>
+          <button
+            onClick={pendingDraw ? handleConfirmDraw : handleConfirmEdit}
+            className="px-3 py-1.5 bg-emerald-600 text-white text-sm font-semibold rounded-md hover:bg-emerald-700 transition-colors"
+          >
+            Confirmar
+          </button>
+          <button
+            onClick={pendingDraw ? handleCancelDraw : handleCancelEdit}
+            className="px-3 py-1.5 bg-slate-200 text-slate-700 text-sm font-semibold rounded-md hover:bg-slate-300 transition-colors"
+          >
+            Cancelar
+          </button>
+        </div>
+      )}
+    </div>
   )
 }

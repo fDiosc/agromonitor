@@ -1,7 +1,7 @@
 # Compliance Científica dos Algoritmos Agronômicos
 
-**Versão:** 0.0.33 (ALPHA)  
-**Data da Auditoria:** 2026-02-12  
+**Versão:** 0.0.34 (ALPHA)  
+**Data da Auditoria:** 2026-02-13  
 **Auditor:** Análise automatizada com verificação de código-fonte e literatura científica
 
 ---
@@ -11,6 +11,7 @@
 | # | Algoritmo | Código Confere | Base Científica | Status |
 |---|-----------|:-:|:-:|:-:|
 | 1 | [Detecção Fenológica (SOS/EOS/Pico)](#1-detecção-fenológica-soseospico) | ✅ | ⚠️ Parcial | Melhorável |
+| 1b | [Detecção Fenológica Dual (v0.0.34)](#1b-detecção-fenológica-dual-v0034) | ✅ | ✅ Robusto | Conforme |
 | 2 | [Cálculo de GDD (Soma Térmica)](#2-cálculo-de-gdd-soma-térmica) | ✅ | ✅ Robusto | Conforme |
 | 3 | [Fusão EOS (NDVI + GDD + Balanço Hídrico)](#3-fusão-eos-ndvi--gdd--balanço-hídrico) | ✅ | ✅ Robusto | Conforme |
 | 4 | [Correlação Histórica (Pearson + RMSE + Aderência)](#4-correlação-histórica-pearson--rmse--aderência) | ✅ | ✅ Robusto | Conforme |
@@ -22,6 +23,7 @@
 | 10 | [Impacto de Estresse Hídrico na EOS](#10-impacto-de-estresse-hídrico-na-eos) | ✅ | ✅ Robusto | Conforme |
 | 11 | [Ajuste de Colheita por Precipitação](#11-ajuste-de-colheita-por-precipitação) | ✅ | ✅ Prática agronômica | Conforme |
 | 12 | [Detecção de Replantio](#12-detecção-de-replantio) | ✅ | ⚠️ Heurístico | Melhorável |
+| 13 | [Geometria Subfield (v0.0.34)](#13-geometria-subfield-v0034) | ✅ | ✅ Original | Conforme |
 
 **Legenda:**
 - ✅ Robusto = Baseado em metodologia científica comprovada e amplamente citada
@@ -83,6 +85,42 @@
 
 ---
 
+## 1b. Detecção Fenológica Dual (v0.0.34)
+
+### Código
+- **Arquivo:** `lib/services/phenology.service.ts`
+- **Função:** `calculatePhenology()` com parâmetro `plantingDateInput` em `PhenologyConfig`
+- **Pipeline:** `lib/services/processing/steps/02-detect-phenology.ts`
+
+### Lógica Implementada
+
+```
+1. Se plantingDateInput fornecido pelo produtor:
+   - plantingDate = plantingDateInput (base confiável)
+   - sosDate = plantingDate + emergenceDays (calculado)
+   - EOS: detectado ou projetado a partir dessa base
+   - confidenceScore: +25 pontos (hasInputPlantingDate)
+2. Se plantingDateInput ausente:
+   - Fenologia "detectada" pelo algoritmo (SOS retroativo, EOS progressivo)
+   - plantingDate estimado = sosDate - emergenceDays
+```
+
+### Distinção Detectada vs Efetiva
+- **Fenologia detectada:** SOS/EOS inferidos pela série NDVI (thresholds, busca retroativa/progressiva)
+- **Fenologia efetiva:** Quando `plantingDateInput` existe, SOS é derivado da data informada; EOS pode ser projetado (modelo exponencial ou cycleDays) ou detectado
+
+### Base Científica
+
+| Aspecto | Referência | Validação |
+|---------|-----------|-----------|
+| Data de plantio como ancoragem | Diao et al. (2020) PhenoCrop Framework — data de plantio melhora precisão fenológica | ✅ Priorizar dado do produtor quando disponível |
+| Emergência como offset | Fehr & Caviness (1977); EMBRAPA — dias até emergência por cultura | ✅ Valores por cultura (7-10 dias) documentados |
+
+### Avaliação
+✅ **Robusto** — Combina detecção automática com ancoragem em dados do produtor quando disponíveis.
+
+---
+
 ## 2. Cálculo de GDD (Soma Térmica)
 
 ### Código
@@ -135,10 +173,10 @@ O código implementa corretamente o Método 1, que é o mais simples e amplament
 
 ### Referências Citadas no Código
 ```
-- PhenoCrop Framework (Sakamoto et al., 2020) → na verdade Diao et al. (2020)
+- PhenoCrop Framework (Diao et al., 2020) — Remote Sensing of Environment, 248
 - GDD Model for Soybean (Mourtzinis et al., 2017)
 - NDVI Senescence Detection (Kumudini et al., 2021)
-- Water Stress Impact (Desclaux et al., 2003) → confirmado como Brevedan & Egli (2003)
+- Water Stress Impact (Brevedan & Egli, 2003) — Crop Science, 43(6), 2083-2095
 - NSF/USDA 2024: Fusão NDVI + GDD = 77% acurácia milho, 71% soja
 ```
 
@@ -152,14 +190,11 @@ O código implementa corretamente o Método 1, que é o mais simples e amplament
 | Fusão NDVI + GDD para EOS | Diao et al. (2020) "Remote sensing phenological monitoring framework" — Remote Sensing of Environment, 248 | ✅ R² > 0.6, RMSE < 1 semana para 56 estágios fenológicos de milho e soja |
 | GDD para projeção de maturação | Mourtzinis et al. (2017) "GDD model for soybean" — Agricultural and Forest Meteorology, 239, 134-140 | ✅ Modelo bem validado para projeção de maturação por soma térmica |
 | NDVI senescência 85% = maturação | Kumudini et al. (2021) "Modeling canopy senescence" — Crop Science, 61(3) | ✅ Precisão de 1.5 dias quando NDVI cai 85% vs pico R5 |
-| Estresse hídrico acelera EOS | Brevedan & Egli (2003, citado como Desclaux 2003) "Short Periods of Water Stress" — Crop Science, 43(6), 2083-2095 | ✅ Confirmado: estresse reduz ciclo em até 39% de yield, acelera senescência |
+| Estresse hídrico acelera EOS | Brevedan & Egli (2003) "Short Periods of Water Stress" — Crop Science, 43(6), 2083-2095 | ✅ Confirmado: estresse reduz ciclo em até 39% de yield, acelera senescência |
 | Fusão multi-fonte 77% acurácia | NSF/USDA (2024) "From satellite-based phenological metrics to crop planting dates" | ✅ Compatível com literatura de fusão multi-sensorial |
 
 ### Avaliação
 ✅ **Robusto** — Abordagem de fusão multi-fonte é o estado da arte em previsão fenológica.
-
-### Nota sobre Autoria
-O código cita "Sakamoto et al., 2020" mas a referência correta é **Diao et al. (2020)**. A publicação de Sakamoto mais relevante é de 2013 (MODIS-based). Recomenda-se corrigir a citação no código.
 
 ---
 
@@ -171,6 +206,7 @@ O código cita "Sakamoto et al., 2020" mas a referência correta é **Diao et al
 - **Score Composto:** Pearson 40% + RMSE 30% + Aderência envelope 30%
 
 ### Lógica Implementada
+
 ```
 1. Alinhamento por SOS (preferido) ou fallback por índice
 2. Pearson: r entre séries NDVI atual e média histórica → score 0-100
@@ -199,11 +235,13 @@ O código cita "Sakamoto et al., 2020" mas a referência correta é **Diao et al
 ## 5. Projeção Adaptativa por Fase Fenológica
 
 ### Código
-- **Arquivo:** `lib/services/cycle-analysis.service.ts`
-- **Funções:** `detectPhenologicalPhase()`, `prepareHistoricalOverlayData()`
+- **Arquivo principal (barrel):** `lib/services/cycle-analysis.service.ts`
+- **Implementação:** `lib/services/cycle-analysis/detection.ts`, `lib/services/cycle-analysis/chart-data.ts`, `lib/services/cycle-analysis/helpers.ts`
+- **Funções:** `detectPhenologicalPhase()` (helpers.ts), `prepareHistoricalOverlayData()` (chart-data.ts)
 - **Método:** Regressão linear dos últimos N pontos → classificação de fase → modelo de projeção específico
 
 ### Lógica Implementada
+
 ```
 1. Regressão linear nos últimos 14 pontos → slope e R²
 2. Classificação:
@@ -236,11 +274,14 @@ O código cita "Sakamoto et al., 2020" mas a referência correta é **Diao et al
 ## 6. Fusão SAR-NDVI (Gap Filling)
 
 ### Código
-- **Arquivo:** `lib/services/ndvi-fusion.service.ts`
-- **Fórmula:** `NDVI_estimado = a × RVI + b` (coeficientes por cultura)
+- **Modelo linear (legado):** `lib/services/ndvi-fusion.service.ts`
+- **Implementação adaptativa:** `lib/services/sar-ndvi/fusion.ts`, `lib/services/sar-ndvi/models.ts`
+- **Dados SAR:** `lib/services/sentinel1/api.ts`
+- **Calibração RVI:** `lib/services/rvi-calibration/calibration.ts`
+- **Fórmula (linear):** `NDVI_estimado = a × RVI + b` (coeficientes por cultura)
 - **Gap threshold:** 10 dias sem dados ópticos
 
-### Coeficientes no Código
+### Coeficientes no Código (ndvi-fusion.service.ts)
 
 | Cultura | a | b |
 |---------|---|---|
@@ -276,7 +317,8 @@ O código cita "Sakamoto et al., 2020" mas a referência correta é **Diao et al
 ## 7. Envelope Climático (Anomalias)
 
 ### Código
-- **Arquivo:** `lib/services/climate-envelope.service.ts`
+- **Arquivo principal (barrel):** `lib/services/climate-envelope.service.ts`
+- **Implementação:** `lib/services/climate-envelope/analysis.ts`, `lib/services/climate-envelope/api.ts`
 - **Método:** Bandas tipo Bollinger (mean ± 1.5σ) sobre dados climáticos históricos de 5 anos
 - **Thresholds:** anomalia ≥ 1.5σ, evento extremo ≥ 2.5σ
 
@@ -385,7 +427,7 @@ O código cita "Sakamoto et al., 2020" mas a referência correta é **Diao et al
 | Aspecto | Referência | Validação |
 |---------|-----------|-----------|
 | Estresse hídrico acelera senescência | Brevedan & Egli (2003) "Short Periods of Water Stress during Seed Filling, Leaf Senescence, and Yield of Soybean" — Crop Science, 43(6), 2083-2095 | ✅ **Confirmado.** Estresse contínuo causou maturidade antecipada e redução de 39% no yield |
-| Magnitude do ajuste (2-12 dias) | Desclaux et al. (2000); Allen et al. (1998) FAO-56 | ✅ Faixa de ajuste é compatível com literatura. Estresse severo pode encurtar ciclo em 1-2 semanas |
+| Magnitude do ajuste (2-12 dias) | Allen et al. (1998) FAO-56 | ✅ Faixa de ajuste é compatível com literatura. Estresse severo pode encurtar ciclo em 1-2 semanas |
 | Impacto no yield (0.70-0.95) | Brevedan & Egli (2003); Doorenbos & Kassam (1979) FAO-33 | ✅ Yield response factors são bem documentados |
 
 ### Avaliação
@@ -451,12 +493,42 @@ O código cita "Sakamoto et al., 2020" mas a referência correta é **Diao et al
 
 ---
 
+## 13. Geometria Subfield (v0.0.34)
+
+### Código
+- **API:** `app/api/fields/[id]/subfields/route.ts` (GET, POST)
+- **Schema:** `prisma/schema.prisma` — `parentFieldId`, relação `Field` ↔ `parentField`
+- **Validação:** Geometria do subtalhão contida no polígono pai (`@turf/boolean-contains`)
+
+### Lógica Implementada
+
+```
+1. Talhões raiz: parentFieldId = null
+2. Subtalhões: parentFieldId = id do talhão pai
+3. Herança: cropType, seasonStartDate, plantingDateInput do pai para novos subtalhões
+4. Processamento: cada subtalhão tem seu próprio AgroData (NDVI, fenologia, EOS)
+5. API: GET /api/fields retorna apenas raiz; subtalhões em subFields ou via GET subfields
+```
+
+### Base Científica
+
+| Aspecto | Referência | Validação |
+|---------|-----------|-----------|
+| Hierarquia espacial pai/filho | Prática em agricultura de precisão; subdivisão de talhões para análise granular | ✅ Permite análise por subárea (variedade, solo, manejo) |
+| Validação de contenção geométrica | OGC Simple Features; Turf.js boolean-contains | ✅ Garante que subtalhões não extrapolem o pai |
+
+### Avaliação
+✅ **Original** — Implementação original do sistema para suportar análise em nível de subfield.
+
+---
+
 ## Resumo de Conformidade
 
-### Algoritmos Totalmente Conformes (8/12)
+### Algoritmos Totalmente Conformes (9/13)
 
 | # | Algoritmo | Referência Principal |
 |---|-----------|---------------------|
+| 1b | Detecção Fenológica Dual | Diao et al. (2020); plantingDateInput |
 | 2 | GDD (Soma Térmica) | McMaster & Wilhelm (1997) |
 | 3 | Fusão EOS | Diao et al. (2020); Mourtzinis (2017); Kumudini (2021) |
 | 4 | Correlação Histórica | Pearson standard + RMSE normalizado |
@@ -465,8 +537,9 @@ O código cita "Sakamoto et al., 2020" mas a referência correta é **Diao et al
 | 9 | Criticidade de Cultura | Thresholds NDVI + classificação EMBRAPA |
 | 10 | Impacto Hídrico | Brevedan & Egli (2003) - Crop Science |
 | 11 | Ajuste Precipitação | Prática agronômica EMBRAPA/CONAB |
+| 13 | Geometria Subfield | Hierarquia espacial OGC |
 
-### Algoritmos Conformes com Oportunidades de Melhoria (4/12)
+### Algoritmos Conformes com Oportunidades de Melhoria (4/13)
 
 | # | Algoritmo | Aspecto Melhorável | Impacto |
 |---|-----------|-------------------|---------|
@@ -477,12 +550,24 @@ O código cita "Sakamoto et al., 2020" mas a referência correta é **Diao et al
 
 *\* Baixo porque o modelo atende ao propósito de análise de risco (não previsão de safra)*
 
-### Errata de Referências
+### Referências Corrigidas (Errata)
 
-| Local | Citação Atual | Citação Correta |
-|-------|--------------|-----------------|
-| `eos-fusion.service.ts` L10 | Sakamoto et al., 2020 | Diao et al. (2020) — Remote Sensing of Environment, 248 |
-| `eos-fusion.service.ts` L14 | Desclaux et al., 2003 | Brevedan & Egli (2003) — Crop Science, 43(6), 2083-2095 |
+| Local | Citação Anterior | Citação Correta |
+|-------|-----------------|-----------------|
+| PhenoCrop Framework | Sakamoto et al., 2020 | **Diao et al. (2020)** — Remote Sensing of Environment, 248 |
+| Estresse hídrico | Desclaux et al., 2003 | **Brevedan & Egli (2003)** — Crop Science, 43(6), 2083-2095 |
+
+*Nota: O código em `eos-fusion.service.ts` já utiliza as citações corretas.*
+
+### Caminhos de Implementação (Refatoração)
+
+| Algoritmo | Barrel (compatível) | Implementação |
+|-----------|--------------------|---------------|
+| Projeção Adaptativa | `cycle-analysis.service.ts` | `cycle-analysis/detection.ts`, `cycle-analysis/chart-data.ts`, `cycle-analysis/helpers.ts` |
+| SAR-NDVI | `ndvi-fusion.service.ts` | `sar-ndvi/fusion.ts`, `sar-ndvi/models.ts` |
+| Dados SAR | — | `sentinel1/api.ts` |
+| Envelope Climático | `climate-envelope.service.ts` | `climate-envelope/analysis.ts`, `climate-envelope/api.ts` |
+| Calibração RVI | `rvi-calibration.service.ts` | `rvi-calibration/calibration.ts` |
 
 ---
 
@@ -505,4 +590,4 @@ O código cita "Sakamoto et al., 2020" mas a referência correta é **Diao et al
 
 ---
 
-*Documento gerado em 2026-02-12. Verificação baseada no código-fonte v0.0.33 e literatura científica peer-reviewed.*
+*Documento gerado em 2026-02-13. Verificação baseada no código-fonte v0.0.34 e literatura científica peer-reviewed.*

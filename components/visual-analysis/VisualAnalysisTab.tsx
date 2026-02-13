@@ -1,107 +1,53 @@
 'use client'
 
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useState, useMemo } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ImageComparisonSlider } from './ImageComparisonSlider'
 import { FieldPolygonOverlay } from './FieldPolygonOverlay'
+import { ImageTypeToggle, CloudSlider, ThumbnailStrip, getCloudBadgeColor, formatImageDate } from './ImageControls'
+import { useVisualAnalysisImages } from '@/hooks/useVisualAnalysisImages'
 import {
-  Loader2, ChevronLeft, ChevronRight,
-  Calendar, Cloud, Layers, AlertCircle, ImageIcon,
-  RefreshCw, ScanEye, Download, CloudRain,
+  Loader2, Layers, AlertCircle, RefreshCw, ScanEye, Download,
+  Calendar, Cloud, CloudRain, ImageIcon,
 } from 'lucide-react'
 
-// ==================== Types ====================
+type ImageTypeFilter = 'truecolor' | 'ndvi' | 'radar'
 
-interface SatImage {
-  id: string
-  date: string
-  type: string
-  collection: string
-  url: string
-  s3Key: string
-  cloudCoverage: number | null
+function MapPinIcon({ size = 14, className = '' }: { size?: number; className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  )
 }
 
 interface VisualAnalysisTabProps {
   fieldId: string
 }
 
-type ImageTypeFilter = 'truecolor' | 'ndvi' | 'radar'
-
-// ==================== Component ====================
-
 export function VisualAnalysisTab({ fieldId }: VisualAnalysisTabProps) {
-  const [images, setImages] = useState<SatImage[]>([])
-  const [dates, setDates] = useState<string[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [totalCount, setTotalCount] = useState(0)
-  const [newCount, setNewCount] = useState(0)
+  const {
+    images,
+    dates,
+    loading,
+    refreshing,
+    error,
+    totalCount,
+    newCount,
+    geometryJson,
+    bbox,
+    fetchImages,
+  } = useVisualAnalysisImages(fieldId)
 
-  // Geometry for polygon overlay
-  const [geometryJson, setGeometryJson] = useState<string | null>(null)
-  const [bbox, setBbox] = useState<[number, number, number, number] | null>(null)
-  const [showOverlay, setShowOverlay] = useState(true)
-
-  // View state
   const [imageType, setImageType] = useState<ImageTypeFilter>('truecolor')
   const [selectedDateIdx, setSelectedDateIdx] = useState(0)
   const [compareMode, setCompareMode] = useState(false)
   const [compareDateIdx, setCompareDateIdx] = useState(0)
-
-  // Cloud filter
-  const [cloudThreshold, setCloudThreshold] = useState(100) // 0-100, show images with cloud <= threshold
-
-  // ==================== Data Fetching ====================
-
-  const fetchImages = useCallback(async (refresh = false) => {
-    if (refresh) {
-      setRefreshing(true)
-    } else {
-      setLoading(true)
-    }
-    setError(null)
-
-    try {
-      const url = `/api/fields/${fieldId}/images${refresh ? '?refresh=true' : ''}`
-      const res = await fetch(url)
-
-      if (!res.ok) {
-        const data = await res.json()
-        setError(data.error || 'Erro ao buscar imagens')
-        return
-      }
-
-      const data = await res.json()
-      setImages(data.images || [])
-      setDates(data.dates || [])
-      setTotalCount(data.totalCount || 0)
-      setNewCount(data.newCount || 0)
-      if (data.geometryJson) setGeometryJson(data.geometryJson)
-      if (data.bbox) setBbox(data.bbox)
-
-      // Reset indices when data changes
-      if (refresh) {
-        setSelectedDateIdx(0)
-        setCompareDateIdx(0)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao buscar imagens')
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
-    }
-  }, [fieldId])
-
-  // Fetch stored images on mount (no refresh)
-  useEffect(() => {
-    fetchImages(false)
-  }, [fetchImages])
-
-  // ==================== Derived State ====================
+  const [cloudThreshold, setCloudThreshold] = useState(100)
+  const [showOverlay, setShowOverlay] = useState(true)
 
   // Filter by type
   const typeFilteredImages = useMemo(() => {
@@ -111,18 +57,16 @@ export function VisualAnalysisTab({ fieldId }: VisualAnalysisTabProps) {
   // Filter by cloud threshold
   const filteredImages = useMemo(() => {
     return typeFilteredImages.filter(img => {
-      if (img.cloudCoverage === null || img.cloudCoverage === undefined) return true // show if no data
+      if (img.cloudCoverage === null || img.cloudCoverage === undefined) return true
       return img.cloudCoverage <= cloudThreshold
     })
   }, [typeFilteredImages, cloudThreshold])
 
-  // Filtered dates (only dates that have at least one image after cloud filter)
   const filteredDates = useMemo(() => {
     const dateSet = new Set(filteredImages.map(img => img.date))
     return dates.filter(d => dateSet.has(d))
   }, [dates, filteredImages])
 
-  // Ensure selectedDateIdx is within bounds
   const safeDateIdx = Math.min(selectedDateIdx, Math.max(0, filteredDates.length - 1))
   const safeCompareDateIdx = Math.min(compareDateIdx, Math.max(0, filteredDates.length - 1))
 
@@ -131,10 +75,8 @@ export function VisualAnalysisTab({ fieldId }: VisualAnalysisTabProps) {
     ? filteredImages.find(img => img.date === filteredDates[safeCompareDateIdx])
     : null
 
-  // Check if radar images are available
   const hasRadar = useMemo(() => images.some(img => img.type === 'radar'), [images])
 
-  // Cloud coverage stats
   const cloudStats = useMemo(() => {
     const withCloud = typeFilteredImages.filter(img => img.cloudCoverage !== null && img.cloudCoverage !== undefined)
     if (withCloud.length === 0) return null
@@ -146,27 +88,16 @@ export function VisualAnalysisTab({ fieldId }: VisualAnalysisTabProps) {
     }
   }, [typeFilteredImages])
 
-  // ==================== Helpers ====================
-
-  const formatDate = (d: string) => {
-    try {
-      return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR', {
-        day: '2-digit', month: 'short', year: 'numeric',
-      })
-    } catch {
-      return d
-    }
+  const handleRefresh = async () => {
+    await fetchImages(true)
+    setSelectedDateIdx(0)
+    setCompareDateIdx(0)
   }
 
-  const getCloudBadgeColor = (cc: number | null | undefined): string => {
-    if (cc === null || cc === undefined) return 'bg-slate-100 text-slate-500'
-    if (cc <= 10) return 'bg-emerald-100 text-emerald-700'
-    if (cc <= 30) return 'bg-yellow-100 text-yellow-700'
-    if (cc <= 60) return 'bg-orange-100 text-orange-700'
-    return 'bg-red-100 text-red-700'
+  const handleSelectDate = (idx: number, target: 'primary' | 'compare') => {
+    if (target === 'compare') setCompareDateIdx(idx)
+    else setSelectedDateIdx(idx)
   }
-
-  // ==================== Render ====================
 
   if (loading) {
     return (
@@ -194,35 +125,11 @@ export function VisualAnalysisTab({ fieldId }: VisualAnalysisTabProps) {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Image type toggle */}
-          <div className="flex bg-slate-100 rounded-lg p-0.5">
-            <button
-              onClick={() => setImageType('truecolor')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                imageType === 'truecolor' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'
-              }`}
-            >
-              Cor Real
-            </button>
-            <button
-              onClick={() => setImageType('ndvi')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                imageType === 'ndvi' ? 'bg-white shadow-sm text-emerald-700' : 'text-slate-500'
-              }`}
-            >
-              NDVI
-            </button>
-            {hasRadar && (
-              <button
-                onClick={() => setImageType('radar')}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                  imageType === 'radar' ? 'bg-white shadow-sm text-violet-700' : 'text-slate-500'
-                }`}
-              >
-                Radar
-              </button>
-            )}
-          </div>
+          <ImageTypeToggle
+            imageType={imageType}
+            setImageType={setImageType}
+            hasRadar={hasRadar}
+          />
 
           {/* Compare toggle */}
           <Button
@@ -257,7 +164,7 @@ export function VisualAnalysisTab({ fieldId }: VisualAnalysisTabProps) {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => fetchImages(true)}
+            onClick={handleRefresh}
             disabled={refreshing}
           >
             {refreshing ? (
@@ -270,33 +177,14 @@ export function VisualAnalysisTab({ fieldId }: VisualAnalysisTabProps) {
       </div>
 
       {/* Cloud coverage filter */}
-      {cloudStats && imageType !== 'radar' && (
-        <Card>
-          <CardContent className="py-3">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 text-xs text-slate-600 shrink-0">
-                <Cloud size={14} className="text-slate-400" />
-                <span className="font-medium">Nuvem max:</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={5}
-                value={cloudThreshold}
-                onChange={(e) => setCloudThreshold(Number(e.target.value))}
-                className="flex-1 h-1.5 bg-slate-200 rounded-full appearance-none cursor-pointer accent-blue-600"
-              />
-              <span className="text-xs font-mono font-bold text-slate-700 w-10 text-right">
-                {cloudThreshold}%
-              </span>
-              <span className="text-[10px] text-slate-400 shrink-0">
-                {filteredImages.length}/{typeFilteredImages.length} imagens
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <CloudSlider
+        cloudThreshold={cloudThreshold}
+        setCloudThreshold={setCloudThreshold}
+        typeFilteredImages={typeFilteredImages}
+        filteredImages={filteredImages}
+        imageType={imageType}
+        cloudStats={cloudStats}
+      />
 
       {/* Error */}
       {error && (
@@ -330,7 +218,6 @@ export function VisualAnalysisTab({ fieldId }: VisualAnalysisTabProps) {
       {/* Image viewer */}
       {!refreshing && filteredDates.length > 0 && (
         <>
-          {/* Comparison slider or single image */}
           {compareMode && currentImage && compareImage ? (
             <ImageComparisonSlider
               beforeImage={currentImage.url}
@@ -350,7 +237,6 @@ export function VisualAnalysisTab({ fieldId }: VisualAnalysisTabProps) {
                     alt={`${imageType} - ${currentImage.date}`}
                     className="w-full h-[500px] object-cover bg-slate-900"
                   />
-                  {/* Polygon overlay */}
                   {showOverlay && geometryJson && bbox && (
                     <FieldPolygonOverlay
                       geometryJson={geometryJson}
@@ -362,7 +248,7 @@ export function VisualAnalysisTab({ fieldId }: VisualAnalysisTabProps) {
                   <div className="absolute top-3 left-3 z-10">
                     <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-black/60 text-white text-sm font-medium backdrop-blur-sm">
                       <Calendar size={12} />
-                      {formatDate(currentImage.date)}
+                      {formatImageDate(currentImage.date)}
                     </span>
                   </div>
                   <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5">
@@ -388,77 +274,15 @@ export function VisualAnalysisTab({ fieldId }: VisualAnalysisTabProps) {
             </Card>
           )}
 
-          {/* Thumbnail strip */}
-          <Card>
-            <CardContent className="py-3">
-              <div className="flex gap-1.5 overflow-x-auto pb-1">
-                {filteredDates.map((date, idx) => {
-                  const img = filteredImages.find(i => i.date === date)
-                  const isCurrent = idx === safeDateIdx
-                  const isCompare = compareMode && idx === safeCompareDateIdx
-
-                  return (
-                    <button
-                      key={date}
-                      onClick={() => {
-                        if (compareMode && idx !== safeDateIdx) {
-                          setCompareDateIdx(idx)
-                        } else {
-                          setSelectedDateIdx(idx)
-                        }
-                      }}
-                      className={`shrink-0 rounded-lg overflow-hidden border-2 transition-all ${
-                        isCurrent ? 'border-blue-600 ring-2 ring-blue-200' :
-                        isCompare ? 'border-amber-500 ring-2 ring-amber-200' :
-                        'border-slate-200 hover:border-slate-400'
-                      }`}
-                      title={`${formatDate(date)}${isCurrent ? ' (selecionado)' : ''}${isCompare ? ' (comparação)' : ''}${img?.cloudCoverage !== null && img?.cloudCoverage !== undefined ? ` | Nuvem: ${img.cloudCoverage.toFixed(0)}%` : ''}`}
-                    >
-                      <div className="relative w-[72px] h-[54px]">
-                        {img ? (
-                          <img
-                            src={img.url}
-                            alt={date}
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="w-full h-full bg-slate-100 flex items-center justify-center">
-                            <ImageIcon size={14} className="text-slate-300" />
-                          </div>
-                        )}
-                        {/* Cloud badge on thumbnail */}
-                        {img?.cloudCoverage !== null && img?.cloudCoverage !== undefined && (
-                          <div className={`absolute top-0.5 right-0.5 px-1 py-0.5 rounded text-[8px] font-bold leading-none ${getCloudBadgeColor(img.cloudCoverage)}`}>
-                            {img.cloudCoverage.toFixed(0)}%
-                          </div>
-                        )}
-                        {/* Date label */}
-                        <div className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[8px] text-center py-0.5 leading-none font-medium">
-                          {new Date(date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
-                        </div>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* Legend */}
-              <div className="flex items-center gap-4 mt-2 text-[10px] text-slate-400">
-                <span className="flex items-center gap-1">
-                  <span className="w-3 h-3 rounded border-2 border-blue-600" /> Selecionado
-                </span>
-                {compareMode && (
-                  <span className="flex items-center gap-1">
-                    <span className="w-3 h-3 rounded border-2 border-amber-500" /> Comparação
-                  </span>
-                )}
-                <span className="ml-auto">
-                  {filteredDates.length} datas | {filteredImages.length} imagens ({imageType === 'truecolor' ? 'cor real' : imageType === 'ndvi' ? 'NDVI' : 'radar'})
-                </span>
-              </div>
-            </CardContent>
-          </Card>
+          <ThumbnailStrip
+            filteredDates={filteredDates}
+            filteredImages={filteredImages}
+            imageType={imageType}
+            selectedDateIdx={safeDateIdx}
+            compareDateIdx={safeCompareDateIdx}
+            compareMode={compareMode}
+            onSelectDate={handleSelectDate}
+          />
         </>
       )}
 
@@ -473,7 +297,7 @@ export function VisualAnalysisTab({ fieldId }: VisualAnalysisTabProps) {
               As imagens buscadas ficam salvas e compartilhadas com a análise por IA.
             </p>
             <Button
-              onClick={() => fetchImages(true)}
+              onClick={handleRefresh}
               disabled={refreshing}
               className="gap-2"
             >
@@ -497,15 +321,5 @@ export function VisualAnalysisTab({ fieldId }: VisualAnalysisTabProps) {
         </Card>
       )}
     </div>
-  )
-}
-
-// Small inline map pin icon to avoid extra import
-function MapPinIcon({ size = 14, className = '' }: { size?: number; className?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
-      <circle cx="12" cy="10" r="3" />
-    </svg>
   )
 }

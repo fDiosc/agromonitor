@@ -6,7 +6,6 @@ import {
   LayoutDashboard,
   Map,
   Truck,
-  FileText,
   Users,
   UserCheck,
   Settings,
@@ -52,11 +51,8 @@ const mainNavItems: NavItem[] = [
     href: '/dashboard/logistics-units',
     icon: Warehouse,
   },
-  {
-    label: 'Relatórios',
-    href: '/reports',
-    icon: FileText,
-  },
+  // Relatórios (/reports/[id]) é acessado via botão "Ver relatório" no dashboard
+  // Não tem página index /reports — rota é apenas para talhões individuais
 ]
 
 const adminNavItems: NavItem[] = [
