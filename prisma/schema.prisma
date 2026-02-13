@@ -93,6 +93,12 @@ model WorkspaceSettings {
   aiCuratorModel            String  @default("gemini-2.5-flash-lite") // Modelo do Curador
   showAIValidation          Boolean @default(true)           // Mostrar seção no relatório
 
+  // ===== SUBTALHÕES =====
+  enableSubFields           Boolean @default(false)          // Habilitar subdivisão de talhões
+
+  // ===== ANÁLISE VISUAL =====
+  enableVisualAnalysis      Boolean @default(false)          // Módulo de análise visual de satélite
+
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -291,6 +297,15 @@ model Field {
   createdById String?
   createdBy   User?   @relation("CreatedBy", fields: [createdById], references: [id])
 
+  // Histórico de edições agronômicas (JSON array)
+  // [{ date, field, oldValue, newValue, editedBy }]
+  editHistory String?
+
+  // ===== SUBTALHÕES (hierarquia pai/filho) =====
+  parentFieldId String?
+  parentField   Field?   @relation("SubFields", fields: [parentFieldId], references: [id], onDelete: Cascade)
+  subFields     Field[]  @relation("SubFields")
+
   // Relações
   agroData AgroData?
   analyses Analysis[]
@@ -299,11 +314,35 @@ model Field {
   dataStatus FieldDataStatus?
   rviCalibrations RviNdviCalibration[]
   rviNdviPairs RviNdviPair[]
+  fieldImages FieldImage[]
 
   @@index([workspaceId])
   @@index([workspaceId, status])
   @@index([producerId])
   @@index([logisticsUnitId])
+  @@index([parentFieldId])
+}
+
+// ==================== IMAGENS DE SATÉLITE PERSISTIDAS ====================
+
+model FieldImage {
+  id             String   @id @default(cuid())
+  fieldId        String
+  field          Field    @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  date           String   // YYYY-MM-DD
+  type           String   // 'truecolor' | 'ndvi' | 'radar' | 'landsat-ndvi' | 's3-ndvi'
+  collection     String   // 'sentinel-2-l2a' | 'sentinel-1-grd' | 'landsat-ot-l1' | 'sentinel-3-olci'
+  s3Key          String   // Full S3 object key
+  width          Int      @default(512)
+  height         Int      @default(512)
+  sizeBytes      Int?
+  cloudCoverage  Float?   // Cloud cover percentage (0-100), from Sentinel Hub Catalog
+  source         String   // 'ai-validation' | 'visual-analysis' | 'process'
+  createdAt      DateTime @default(now())
+
+  @@unique([fieldId, date, type, collection])
+  @@index([fieldId])
+  @@index([fieldId, date])
 }
 
 // ==================== STATUS DE DADOS DO TALHÃO ====================
@@ -367,7 +406,8 @@ model AgroData {
   areaHa            Float?
   volumeEstimatedKg Float?
 
-  // Fenologia detectada
+  // Fenologia EFETIVA (usada por todos os serviços e displays)
+  // Pode vir da detecção automática OU de edição manual
   plantingDate          DateTime?
   sosDate               DateTime?
   eosDate               DateTime?
@@ -384,6 +424,17 @@ model AgroData {
   yieldEstimateKgHa  Float? // Produtividade estimada kg/ha
   phenologyHealth    String? // EXCELLENT | GOOD | FAIR | POOR
   peakNdvi           Float? // NDVI máximo detectado
+
+  // ===== VALORES DETECTADOS AUTOMATICAMENTE (preservados para melhoria de algoritmos) =====
+  // Estes campos NUNCA são sobrescritos por edições manuais
+  detectedPlantingDate  DateTime?
+  detectedSosDate       DateTime?
+  detectedEosDate       DateTime?
+  detectedPeakDate      DateTime?
+  detectedCycleDays     Int?
+  detectedCropType      String?   // Cultura detectada pelo algoritmo
+  detectedConfidence    String?   // HIGH | MEDIUM | LOW do algoritmo original
+  detectedConfidenceScore Int?
 
   // Dados brutos da API Merx (JSON stringified)
   rawNdviData       String?

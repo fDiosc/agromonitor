@@ -61,13 +61,13 @@ O MERX AGRO Monitor segue uma arquitetura Full-Stack com Next.js, onde o fronten
 │  │  │ eos-fusion  │  │  thermal    │  │water-balance│              │   │
 │  │  │  service    │  │   (GDD)     │  │   service   │              │   │
 │  │  └─────────────┘  └─────────────┘  └─────────────┘              │   │
-│  │  ┌─────────────────────────────────────────────────┐              │   │
-│  │  │            AI VALIDATION LAYER (v0.0.29)         │              │   │
-│  │  │  ┌───────────┐  ┌───────────┐  ┌────────────┐  │              │   │
-│  │  │  │  Curator  │  │   Judge   │  │Orchestrator│  │              │   │
-│  │  │  │  Agent    │  │   Agent   │  │  Service   │  │              │   │
-│  │  │  └───────────┘  └───────────┘  └────────────┘  │              │   │
-│  │  └─────────────────────────────────────────────────┘              │   │
+│  │  ┌───────────────────────────────────────────────────────────────┐   │
+│  │  │            AI VALIDATION LAYER (v0.0.32)                       │   │
+│  │  │  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌────────────┐ │   │
+│  │  │  │  Curator  │  │ Verifier  │  │   Judge   │  │Orchestrator│ │   │
+│  │  │  │  Agent    │  │  Agent    │  │   Agent   │  │  Service   │ │   │
+│  │  │  └───────────┘  └───────────┘  └───────────┘  └────────────┘ │   │
+│  │  └───────────────────────────────────────────────────────────────┘   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
                 │                    │                    │
@@ -172,17 +172,19 @@ No primeiro acesso após login, usuários que não aceitaram o disclaimer são a
 - Interação com usuário
 - Validação de formulários
 
-**Dashboard (v0.0.31):**
-- Tabela com 13 colunas individuais ordenáveis (clique no cabeçalho)
+**Dashboard (v0.0.35):**
+- Tabela com 15 colunas individuais ordenáveis (clique no cabeçalho)
 - Ordenação padrão: colheita prevista mais próxima primeiro
-- 7 filtros combinatórios em 2 linhas (logística + fenologia/IA)
+- 10 filtros combinatórios em 3 linhas: pesquisa textual (nome, produtor, cidade), subtalhões (sim/não), status, tipo atribuição, caixa logística, colheita, confiança, cultura, IA, resultado IA
 - Processamento server-side de JSON pesados (rawAreaData → fusedEosDate, aiValidationAgreement → harvestReady)
+- **Visão folder de subtalhões**: Talhões pai com subtalhões exibem ícone de pasta com expand/collapse. Subtalhões aparecem como linhas indentadas sob o pai com background azulado, nome do pai como referência, e ações próprias (reprocessar, relatório, excluir)
+- API `/api/fields` retorna subtalhões inline com agroData processado (mesma lógica de transformação do pai)
 
 **Componentes Principais:**
 ```
 components/
 ├── fields/
-│   └── field-table.tsx      # Tabela ordenável de talhões (colunas Cultura+Status, sorting, Field type export)
+│   └── field-table.tsx      # Tabela ordenável com visão folder (pai + filhos expandíveis), sorting, Field type export
 ├── ai-validation/
 │   └── AIValidationPanel.tsx # Painel de resultados IA no relatório
 ├── modals/
@@ -225,9 +227,11 @@ app/api/
 ├── fields/
 │   ├── route.ts                    # GET (list), POST (create)
 │   └── [id]/
-│       ├── route.ts                # GET, DELETE
+│       ├── route.ts                # GET, PATCH (edição agronômica), DELETE
 │       ├── status/route.ts         # GET (lightweight status check)
-│       ├── process/route.ts        # POST (process)
+│       ├── process/route.ts        # POST (process, dual phenology)
+│       ├── subfields/route.ts      # GET, POST (subtalhões)
+│       ├── images/route.ts         # GET (imagens satélite, URLs S3)
 │       └── analyze/[templateId]/route.ts
 ├── logistics/
 │   └── diagnostic/route.ts         # GET (aggregated data)
@@ -268,11 +272,13 @@ app/api/
 | Geometry | `geometry.service.ts` | Validação e cálculo de geometrias |
 | Geocoding | `geocoding.service.ts` | Geocodificação reversa |
 | AI Templates | `ai.service.ts` | Integração com Gemini para análises textuais |
-| AI Validation | `ai-validation.service.ts` | Orquestrador do pipeline de validação visual |
-| Feature Flags | `feature-flags.service.ts` | Configuração de módulos por workspace |
+| AI Validation | `ai-validation.service.ts` | Orquestrador do pipeline de validação visual (Curator→Verifier→Judge) |
+| Field Images | `field-images.service.ts` | Serviço compartilhado de imagens (fetch, S3, incremental) — IA + Visual Analysis |
+| Feature Flags | `feature-flags.service.ts` | Configuração de módulos por workspace (incl. `enableVisualAnalysis`, `enableSubFields`) |
 | Pricing | `pricing.service.ts` | Custos de API (Gemini, Sentinel Hub) |
 | Sentinel-1 | `sentinel1.service.ts` | Integração Radar Copernicus |
 | NDVI Fusion | `ndvi-fusion.service.ts` | Fusão óptico + radar |
+| S3 Client | `s3.ts` (lib/) | Upload, download, presigned URLs para armazenamento de imagens em AWS S3 |
 
 **Agentes IA (lib/agents/):**
 
@@ -354,10 +360,15 @@ model Field {
   name              String
   cropType          CropType  @default(SOJA)  // Tipo de cultura
   plantingDateInput DateTime? // Data de plantio informada pelo produtor
+  seasonStartDate   DateTime? // Data de início da safra (editável)
   status            String    // PENDING | PROCESSING | SUCCESS | PARTIAL | ERROR
   errorMessage      String?
   geometryJson      String
   areaHa            Float?
+  editHistory       String?   // JSON: [{timestamp, field, oldValue, newValue}]
+  parentFieldId     String?   // Hierarquia pai/filho (subtalhões)
+  parentField       Field?    @relation("SubFields", ...)
+  subFields         Field[]   @relation("SubFields")
   producerId        String?   // Produtor vinculado (opcional)
   producer          Producer?
   workspaceId       String?   // Multi-tenancy
@@ -367,17 +378,44 @@ model Field {
   agroData          AgroData?
   analyses          Analysis[]
   ndviData          NdviDataPoint[]
+  fieldImages       FieldImage[]
 }
 
 model AgroData {
-  id                    String
-  plantingDate          DateTime?
-  sosDate               DateTime?
-  eosDate               DateTime?
-  peakDate              DateTime?
-  volumeEstimatedKg     Float?
-  confidenceScore       Int?
-  field                 Field
+  id                      String
+  plantingDate            DateTime?
+  sosDate                 DateTime?
+  eosDate                 DateTime?
+  peakDate                DateTime?
+  volumeEstimatedKg       Float?
+  confidenceScore         Int?
+  // Detecções algorítmicas preservadas (v0.0.34)
+  detectedPlantingDate    DateTime?
+  detectedSosDate         DateTime?
+  detectedEosDate         DateTime?
+  detectedPeakDate        DateTime?
+  detectedCycleDays       Int?
+  detectedCropType        String?
+  detectedConfidence      String?
+  detectedConfidenceScore Int?
+  field                   Field
+}
+
+// Persistência de imagens de satélite (v0.0.34)
+model FieldImage {
+  id          String   @id @default(cuid())
+  fieldId     String
+  field       Field    @relation(...)
+  date        String   // YYYY-MM-DD
+  type        String   // 'truecolor' | 'ndvi' | 'radar' | 'landsat-ndvi' | 's3-ndvi'
+  collection  String   // 'sentinel-2-l2a' | 'sentinel-1-grd' | etc.
+  s3Key       String   // Full S3 object key
+  width       Int      @default(512)
+  height      Int      @default(512)
+  sizeBytes   Int?
+  source      String   // 'ai-validation' | 'visual-analysis' | 'process'
+
+  @@unique([fieldId, date, type, collection])
 }
 
 model Analysis {
@@ -447,21 +485,40 @@ model Analysis {
         └─────────────┘ └─────────────┘ └─────────────┘
 ```
 
-### Fluxo de Validação Visual IA (v0.0.29)
+### Fluxo de Validação Visual IA (v0.0.29, refatorado v0.0.34)
 
 ```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│   Trigger    │────▶│  Fetch Sat   │────▶│   Curator    │
-│ MANUAL/AUTO/ │     │  Images via  │     │   Agent      │
-│ LOW_CONF     │     │ Sentinel Hub │     │ (select+rank)│
-└──────────────┘     └──────────────┘     └──────┬───────┘
-                                                  │
-                                                  ▼
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│   Persist    │◀────│  Normalize   │◀────│    Judge     │
-│   AgroData   │     │  Response    │     │    Agent     │
-│  + Analysis  │     │ (PT→EN, old  │     │(multimodal)  │
-└──────────────┘     │  →new schema)│     └──────────────┘
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│   Trigger    │────▶│ field-images │────▶│   Curator    │────▶│  Verifier    │
+│ MANUAL/AUTO/ │     │  .service    │     │   Agent      │     │ (condicional)│
+│ LOW_CONF     │     │ (S3 + CDSE)  │     │ (select+rank)│     │              │
+└──────────────┘     └──────┬───────┘     └──────────────┘     └──────┬───────┘
+                            │                                         │
+                    ┌───────▼───────┐                                 ▼
+                    │  S3 Storage   │     ┌──────────────┐     ┌──────────────┐
+                    │ (persist new) │     │   Persist    │◀────│    Judge     │
+                    │ + FieldImage  │     │   AgroData   │     │    Agent     │
+                    │   metadata    │     │  + Analysis  │     │(multimodal)  │
+                    └───────────────┘     └──────────────┘     └──────────────┘
+```
+
+**Nota (v0.0.34)**: O fetch de imagens agora passa pelo `field-images.service.ts` compartilhado. Imagens são persistidas em S3 (`agro-monitor/{workspaceId}/fields/{fieldId}/`), com metadados no modelo `FieldImage`. O fetch é incremental — apenas datas novas são buscadas no Sentinel Hub.
+
+### Fluxo de Análise Visual (v0.0.34)
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  Tab Visual  │────▶│ GET /api/    │────▶│ field-images │────▶│  S3 Presign  │
+│  no Relatório│     │ fields/[id]/ │     │  .service    │     │  URLs        │
+│  (condicional│     │ images       │     │ (stored +    │     │              │
+│  feat. flag) │     │ ?refresh=... │     │  incremental)│     └──────┬───────┘
+└──────────────┘     └──────────────┘     └──────────────┘            │
+                                                                      ▼
+                     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+                     │ Comparison   │◀────│   Timeline   │◀────│   Image      │
+                     │ Slider       │     │   Navegação  │     │   List       │
+                     │ (before/     │     │   por datas  │     │  (URLs S3)   │
+                     │  after)      │     └──────────────┘     └──────────────┘
                      └──────────────┘
 ```
 
@@ -530,7 +587,7 @@ Base URL: `https://api.merx.app.br`
 
 **Uso em Templates**: Geração de análises textuais (Crédito, Logística, Risco).
 
-**Uso em Validação Visual (v0.0.29, atualizado v0.0.32/v0.0.33)**: Pipeline de 3 agentes (Curator → Verifier → Judge) que analisam imagens de satélite para confirmar cultura declarada e validar projeções de fenologia. Verifier opera como gate para o Judge, com short-circuit em NO_CROP/MISMATCH. Resultados do Judge são suprimidos no dashboard e relatório quando crop issues são detectados. Dashboard reestruturado (v0.0.33): colunas Cultura (tipo declarado) + Status (badge algorítmico) separadas. Relatório inclui modal de mapa com polígono do talhão via Leaflet (satélite/OSM).
+**Uso em Validação Visual (v0.0.29, atualizado v0.0.32/v0.0.33)**: Pipeline de 3 agentes (Curator → Verifier → Judge) que analisam imagens de satélite para confirmar cultura declarada e validar projeções de fenologia. O Verifier usa `gemini-2.5-flash-lite` e opera como gate condicional para o Judge, com short-circuit em NO_CROP/MISMATCH. Resultados do Judge são suprimidos no dashboard e relatório quando crop issues são detectados. Dashboard reestruturado (v0.0.33): colunas Cultura (tipo declarado) + Status (badge algorítmico) separadas. Relatório inclui modal de mapa com polígono do talhão via Leaflet (satélite/OSM).
 
 ### Sentinel Hub (Copernicus Data Space)
 
@@ -545,6 +602,27 @@ API para busca e processamento de imagens de satélite.
 
 **Autenticação**: OAuth2 Client Credentials (armazenado em WorkspaceSettings ou `.env`).
 
+### AWS S3 (Armazenamento de Imagens — v0.0.34)
+
+Armazenamento de imagens de satélite para Análise Visual e Validação IA.
+
+| Configuração | Valor |
+|-------------|-------|
+| **SDK** | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` |
+| **Bucket** | Configurável via `S3_BUCKET` (default: `pocs-merxlabs`) |
+| **Região** | Configurável via `S3_REGION` (default: `us-east-1`) |
+| **Path** | `agro-monitor/{workspaceId}/fields/{fieldId}/{date}_{type}_{collection}.png` |
+| **Alternativa** | Suporta R2/MinIO via `S3_ENDPOINT` opcional |
+| **Arquivo** | `lib/s3.ts` |
+
+**Operações:**
+- `uploadImage` — Envio de imagem PNG para S3
+- `downloadImage` — Download de imagem para processamento (base64 para IA)
+- `getPresignedUrl` — URL assinada (1h) para visualização no frontend
+- `buildImageKey` — Geração de chave S3 com segregação por workspace
+
+**Metadados:** Modelo `FieldImage` (Prisma) registra cada imagem com `fieldId`, `date`, `type`, `collection`, `s3Key`, `source`.
+
 ---
 
 ## Considerações de Performance
@@ -552,6 +630,7 @@ API para busca e processamento de imagens de satélite.
 ### Caching
 - Dados NDVI são armazenados no banco após processamento
 - Evita chamadas repetidas à API Merx
+- Imagens de satélite persistidas em S3 com fetch incremental (apenas datas novas são buscadas no Sentinel Hub)
 
 ### Lazy Loading
 - Componentes de mapa carregados dinamicamente (next/dynamic)

@@ -35,6 +35,13 @@ Configure as seguintes variáveis no painel do CapRover:
 | `MERX_API_URL` | ✅ | URL da API Merx |
 | `JWT_SECRET` | ✅ | Chave secreta para tokens JWT |
 | `CORS_PROXY_URL` | ❌ | URL do proxy CORS (opcional) |
+| `S3_ACCESS_KEY_ID` | ❌* | AWS Access Key ID para armazenamento de imagens |
+| `S3_SECRET_ACCESS_KEY` | ❌* | AWS Secret Access Key |
+| `S3_BUCKET` | ❌* | Nome do bucket S3 (default: `pocs-merxlabs`) |
+| `S3_REGION` | ❌* | Região AWS (default: `us-east-1`) |
+| `S3_ENDPOINT` | ❌ | Endpoint customizado (apenas para R2/MinIO) |
+
+> *Variáveis S3 são necessárias se a funcionalidade de persistência de imagens estiver habilitada.
 
 ### Exemplo de Configuração
 
@@ -44,6 +51,12 @@ GEMINI_API_KEY=AIzaSy...
 MERX_API_URL=https://homolog.api.merx.tech/api/monitoramento
 JWT_SECRET=sua-chave-secreta-muito-segura-aqui
 CORS_PROXY_URL=https://corsproxy.io/?
+
+# Armazenamento S3 (v0.0.34)
+S3_ACCESS_KEY_ID=AKIA...
+S3_SECRET_ACCESS_KEY=...
+S3_BUCKET=pocs-merxlabs
+S3_REGION=us-east-1
 ```
 
 > ⚠️ **IMPORTANTE**: Em produção, use uma `JWT_SECRET` forte e única!
@@ -243,6 +256,8 @@ caprover api --path /user/apps/appData/merx-agro/logs --method GET
 - [ ] Health check passando
 - [ ] Teste de login funcionando
 - [ ] Teste de processamento de talhão funcionando
+- [ ] Variáveis S3 configuradas (se usando persistência de imagens)
+- [ ] Bucket S3 criado e acessível com as credenciais fornecidas
 
 ---
 

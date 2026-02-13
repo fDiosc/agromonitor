@@ -26,7 +26,8 @@
   - [1.3 Google Gemini (IA Generativa)](#13-google-gemini-ia-generativa)
     - [1.3.1 AI Analysis (Templates)](#131-ai-analysis-templates)
     - [1.3.2 Curator Agent](#132-curator-agent)
-    - [1.3.3 Judge Agent](#133-judge-agent)
+    - [1.3.3 Verifier Agent](#133-verifier-agent)
+    - [1.3.4 Judge Agent](#134-judge-agent)
   - [1.4 Nominatim / OpenStreetMap (Geocoding)](#14-nominatim--openstreetmap-geocoding)
     - [1.4.1 Reverse Geocoding (Server)](#141-reverse-geocoding-server)
     - [1.4.2 Search (Client)](#142-search-client)
@@ -501,7 +502,7 @@ const rvi = calculateRVI(vhDb, vvDb)   // Radar Vegetation Index
 | **Accept** | `image/png` |
 | **Auth** | `Authorization: Bearer {access_token}` |
 | **Timeout** | 60000ms |
-| **Proposito** | Gerar imagens PNG de satelite para validacao visual AI (Curator + Judge) |
+| **Proposito** | Gerar imagens PNG de satelite para validacao visual AI (Curator + Verifier + Judge) |
 
 **Request:**
 ```json
@@ -539,6 +540,8 @@ const rvi = calculateRVI(vhDb, vvDb)   // Radar Vegetation Index
 ---
 
 ### 1.3 Google Gemini (IA Generativa)
+
+Validacao visual AI usa um pipeline de 3 agentes: **Curator** (curadoria de imagens) → **Verifier** (confirmacao de cultura, quando necessario) → **Judge** (validacao agronomica final).
 
 | Atributo | Valor |
 |----------|-------|
@@ -617,12 +620,37 @@ const result = await ai.models.generateContent({
 
 ---
 
-#### 1.3.3 Judge Agent
+#### 1.3.3 Verifier Agent
+
+| Atributo | Valor |
+|----------|-------|
+| **Arquivo fonte** | `lib/agents/verifier.ts` |
+| **Modelo** | `gemini-2.5-flash-lite` |
+| **Proposito** | Confirma se a cultura declarada realmente esta presente no talhao. Atua como portao entre Curator e Judge |
+| **Quando e chamado** | Somente quando `crop-pattern.service` define `shouldCallVerifier=true` (padroes ANOMALOUS ou ATYPICAL) |
+
+**Input:**
+- `curatedImages` — imagens curadas pelo Curator
+- `multiSensorNdvi` — serie temporal NDVI multi-sensor
+- `fieldArea` — area do talhao (ha)
+- `cropType` — cultura declarada
+- `cropCategory` — ANNUAL | SEMI_PERENNIAL | PERENNIAL
+- `cropPatternResult` — resultado do algoritmo de padrao de cultura
+
+**Output:** `CropVerification` com:
+- `status`: `CONFIRMED` | `SUSPICIOUS` | `MISMATCH` | `NO_CROP` | `CROP_FAILURE`
+- `visualAssessment`, `alternativeHypotheses`, `confidenceInDeclaredCrop`, `evidence`
+
+**Curto-circuito:** Se `NO_CROP` ou `MISMATCH`, o pipeline termina antes do Judge. Se `CROP_FAILURE`, o Judge roda com contexto de perda total. Se `CONFIRMED` ou `SUSPICIOUS`, o Judge roda normalmente.
+
+---
+
+#### 1.3.4 Judge Agent
 
 | Atributo | Valor |
 |----------|-------|
 | **Arquivo fonte** | `lib/agents/judge.ts` |
-| **Quando** | Apos o Curator, na pipeline de validacao visual AI |
+| **Quando** | Apos o Curator (e Verifier quando aplicavel), na pipeline de validacao visual AI |
 | **Proposito** | Validacao agronomica final -- compara imagens com dados algoritmicos |
 
 **Chamada:** Identica ao Curator (`ai.models.generateContent`), modelo `gemini-3-flash-preview`.
@@ -801,6 +829,37 @@ Servicos sem autenticacao usados para renderizacao de mapas e analytics.
 | `https://www.clarity.ms/tag/vbr4xce9j5` | Microsoft Clarity (analytics) | `app/layout.tsx` |
 | `https://www.googletagmanager.com/gtag/js?id=G-SCYR38N5VF` | Google Analytics (GA4) | `app/layout.tsx` |
 
+### 1.7 AWS S3 (Armazenamento de Imagens — v0.0.34)
+
+| Atributo | Valor |
+|----------|-------|
+| **SDK** | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` |
+| **Bucket** | Configuravel via `S3_BUCKET` (default: `pocs-merxlabs`) |
+| **Regiao** | Configuravel via `S3_REGION` (default: `us-east-1`) |
+| **Arquivo fonte** | `lib/s3.ts` |
+| **Quando** | Persistencia de imagens de satelite (AI Validation + Analise Visual) |
+
+**Operacoes:**
+
+| Funcao | SDK Method | Proposito |
+|--------|-----------|-----------|
+| `uploadImage(key, buffer)` | `PutObjectCommand` | Upload de imagem PNG para S3 |
+| `downloadImage(key)` | `GetObjectCommand` | Download para processamento (base64 para IA) |
+| `getPresignedUrl(key)` | `getSignedUrl` | URL assinada (1h) para frontend |
+| `deleteImage(key)` | `DeleteObjectCommand` | Remocao de imagem |
+
+**Path convention:**
+```
+{bucket}/agro-monitor/{workspaceId}/fields/{fieldId}/{date}_{type}_{collection}.png
+```
+
+**Exemplo:**
+```
+pocs-merxlabs/agro-monitor/ws_abc123/fields/f_xyz789/2025-01-15_truecolor_sentinel-2-l2a.png
+```
+
+**Compatibilidade:** Suporta AWS S3, Cloudflare R2 e MinIO via `S3_ENDPOINT` opcional.
+
 ---
 
 ## 2. APIs Internas (Next.js Routes)
@@ -906,18 +965,42 @@ Todas as rotas internas ficam em `app/api/` e seguem o padrao Next.js App Router
 | **Auth** | Cookie JWT |
 | **Query params** | `producerId?` (filtra por produtor) |
 
-**Response:**
+**Response (v0.0.35):**
 ```json
 {
   "fields": [
     {
       "id": "...", "name": "Talhao 1", "cropType": "SOJA", "status": "SUCCESS",
       "city": "Agua Boa", "state": "Mato Grosso", "areaHa": 250.5,
+      "plantingDateInput": "2025-11-15", "seasonStartDate": "2025-10-01",
+      "editHistory": "[...]", "parentFieldId": null,
+      "_count": { "subFields": 3 },
+      "subFields": [
+        {
+          "id": "...", "name": "Talhão 1", "status": "PENDING", "cropType": "SOJA",
+          "parentFieldId": "...", "agroData": { "..." }
+        }
+      ],
+      "agroData": {
+        "areaHa": 250.5, "volumeEstimatedKg": 900000,
+        "confidence": "HIGH", "confidenceScore": 82,
+        "eosDate": "2026-03-15", "sosDate": "2025-11-20",
+        "fusedEosDate": "2026-03-10",
+        "cropPatternStatus": "TYPICAL",
+        "aiCropVerificationStatus": "CONFIRMED",
+        "aiValidationAgreement": "CONFIRMED",
+        "detectedPlantingDate": "2025-11-18",
+        "detectedCropType": "SOJA",
+        "detectedConfidence": "HIGH"
+      },
       "producer": { "id": "...", "name": "Salvadori" },
       "logisticsUnit": { "id": "...", "name": "Unidade Norte" }
     }
   ]
 }
+```
+
+> **Nota (v0.0.35):** Apenas talhões raiz são retornados (`parentFieldId: null`). Subtalhões são incluídos inline no array `subFields` de cada pai, com `agroData` processado pela mesma função de transformação (`processAgroData`). O campo `_count.subFields` permanece para contagem rápida.
 ```
 
 ---
@@ -1095,6 +1178,122 @@ Todas as rotas internas ficam em `app/api/` e seguem o padrao Next.js App Router
 **Response:**
 ```json
 { "id": "...", "templateId": "...", "isStale": false, "reprocessStatus": "COMPLETED", "dataVersion": 3 }
+```
+
+---
+
+#### GET /api/fields/[id]/subfields (v0.0.34)
+
+| Atributo | Valor |
+|----------|-------|
+| **Arquivo** | `app/api/fields/[id]/subfields/route.ts` |
+| **Auth** | Cookie JWT |
+| **Feature Flag** | `enableSubFields` |
+| **Proposito** | Listar talhao pai e seus subtalhoes |
+
+**Response:**
+```json
+{
+  "parentField": {
+    "id": "...", "name": "Fazenda Roseira", "geometryJson": "...", "cropType": "SOJA",
+    "subFields": [
+      { "id": "...", "name": "Talhão 1", "geometryJson": "...", "cropType": "SOJA", "status": "PENDING" }
+    ]
+  }
+}
+```
+
+---
+
+#### POST /api/fields/[id]/subfields (v0.0.34)
+
+| Atributo | Valor |
+|----------|-------|
+| **Arquivo** | `app/api/fields/[id]/subfields/route.ts` |
+| **Auth** | Cookie JWT (ADMIN, OPERATOR) |
+| **Feature Flag** | `enableSubFields` |
+| **Proposito** | Criar subtalhao dentro do talhao pai |
+
+**Body:**
+```json
+{
+  "name": "Talhão Sul",
+  "geometryJson": "{\"type\":\"Polygon\",\"coordinates\":[...]}",
+  "cropType": "SOJA"
+}
+```
+
+**Validacao:**
+- Geometria do subtalhao deve estar contida no poligono pai (`@turf/boolean-contains`)
+- Nome automatico se nao fornecido (Talhao 1, Talhao 2...)
+- Herda propriedades do pai (workspace, producer, seasonStart)
+
+**Response:**
+```json
+{ "success": true, "field": { "id": "...", "name": "Talhão Sul", "parentFieldId": "..." } }
+```
+
+---
+
+#### GET /api/fields/[id]/images (v0.0.34)
+
+| Atributo | Valor |
+|----------|-------|
+| **Arquivo** | `app/api/fields/[id]/images/route.ts` |
+| **Auth** | Cookie JWT |
+| **Proposito** | Obter imagens de satelite do talhao (URLs assinadas S3) |
+
+**Query params:**
+| Param | Tipo | Default | Descricao |
+|-------|------|---------|-----------|
+| `refresh` | boolean | `false` | Se `true`, busca novas imagens no Sentinel Hub (incremental) |
+
+**Response:**
+```json
+{
+  "images": [
+    {
+      "id": "...", "fieldId": "...", "date": "2025-01-15", "type": "truecolor",
+      "collection": "sentinel-2-l2a", "s3Key": "agro-monitor/ws1/fields/f1/2025-01-15_truecolor_sentinel-2-l2a.png",
+      "url": "https://pocs-merxlabs.s3.amazonaws.com/agro-monitor/..."
+    }
+  ],
+  "dates": ["2025-01-15", "2025-01-30"],
+  "totalCount": 36,
+  "newCount": 4
+}
+```
+
+**Nota:** Imagens sao compartilhadas entre AI Validation e Analise Visual. O servico `field-images.service.ts` centraliza o fetch e armazenamento.
+
+---
+
+#### PATCH /api/fields/[id] — Edicao Agronomica (v0.0.34)
+
+| Atributo | Valor |
+|----------|-------|
+| **Arquivo** | `app/api/fields/[id]/route.ts` |
+| **Auth** | Cookie JWT (ADMIN, OPERATOR) |
+| **Proposito** | Editar dados agronomicos com reprocessamento |
+
+**Body (campos opcionais):**
+```json
+{
+  "plantingDateInput": "2025-10-15",
+  "cropType": "MILHO",
+  "seasonStartDate": "2025-09-01",
+  "geometryJson": "{...}"
+}
+```
+
+**Comportamento:**
+- Alteracoes agronomicas (`plantingDateInput`, `cropType`, `seasonStartDate`) sao registradas em `editHistory` (JSON)
+- Se houver alteracao agronomica, dispara reprocessamento background (`POST /api/fields/[id]/process`)
+- Dados detectados automaticamente sao preservados nos campos `detected*` do `AgroData`
+
+**Response:**
+```json
+{ "success": true, "field": { ... }, "reprocessing": true }
 ```
 
 ---
@@ -1533,14 +1732,21 @@ Rotas de debug para desenvolvimento. Nao sao chamadas pelo frontend em producao.
 |----------|-------------|--------------|-----------|
 | `DATABASE_URL` | Sim | Prisma | String de conexao PostgreSQL |
 | `JWT_SECRET` | Sim | `lib/auth.ts`, middleware | Segredo para assinatura JWT |
-| `GEMINI_API_KEY` | Sim | `ai.service.ts`, `curator.ts`, `judge.ts` | Chave API Google Gemini |
+| `GEMINI_API_KEY` | Sim | `ai.service.ts`, `curator.ts`, `verifier.ts`, `judge.ts` | Chave API Google Gemini |
 | `MERX_API_URL` | Nao | `merx.service.ts`, `thermal.service.ts`, `precipitation.service.ts`, `water-balance.service.ts` | Base URL da Merx API (default: `https://homolog.api.merx.tech/api/monitoramento`) |
 | `CORS_PROXY_URL` | Nao | `merx.service.ts` | URL do proxy CORS (default: `https://corsproxy.io/?`) |
 | `copernicusClientId` | Nao* | `sentinel1.service.ts` | Client ID OAuth2 Copernicus (*em WorkspaceSettings) |
 | `copernicusClientSecret` | Nao* | `sentinel1.service.ts` | Client Secret OAuth2 Copernicus (*em WorkspaceSettings) |
 | `googleMapsApiKey` | Nao* | `distance.service.ts` | Chave Google Maps Distance Matrix (*em WorkspaceSettings) |
+| `S3_ACCESS_KEY_ID` | Nao** | `lib/s3.ts` | AWS Access Key ID para armazenamento de imagens |
+| `S3_SECRET_ACCESS_KEY` | Nao** | `lib/s3.ts` | AWS Secret Access Key |
+| `S3_BUCKET` | Nao** | `lib/s3.ts` | Nome do bucket S3 (default: `pocs-merxlabs`) |
+| `S3_REGION` | Nao** | `lib/s3.ts` | Regiao AWS (default: `us-east-1`) |
+| `S3_ENDPOINT` | Nao | `lib/s3.ts` | Endpoint customizado para R2/MinIO (omitir para AWS S3 padrao) |
 
 > *Nota: `copernicusClientId`, `copernicusClientSecret` e `googleMapsApiKey` sao armazenados no modelo `WorkspaceSettings` no banco de dados, nao como variaveis de ambiente.
+
+> **Nota: Variaveis S3 sao necessarias apenas se a funcionalidade de persistencia de imagens de satelite estiver habilitada (`enableVisualAnalysis` ou AI Validation com S3). O sistema verifica `isS3Configured()` antes de tentar persistir.
 
 ---
 
@@ -1571,9 +1777,16 @@ POST /api/fields/[id]/process
   |      +-- Statistical API (VH/VV)
   |
   +---> AI Validation (se enableAIValidation)
-         +-- Sentinel Hub Process API (imagens)
-         +-- Gemini Curator Agent
-         +-- Gemini Judge Agent
+  |      +-- field-images.service.ts (fetch incremental)
+  |      |   +-- S3 Storage (persist new images)
+  |      |   +-- Sentinel Hub Process API (somente datas novas)
+  |      +-- Gemini Curator Agent
+  |      +-- Gemini Verifier Agent (se cropPatternResult.shouldCallVerifier)
+  |      +-- Gemini Judge Agent
+  |
+  +---> Dual Phenology (v0.0.34)
+         +-- calculatePhenology() → detectedXxx (preservado)
+         +-- calculatePhenology(userInput) → valores efetivos
 ```
 
 ### Fluxo de criacao de Field

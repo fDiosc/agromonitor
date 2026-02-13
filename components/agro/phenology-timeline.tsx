@@ -34,6 +34,10 @@ interface PhenologyTimelineProps {
   method: string | null
   zarcInfo?: ZarcInfo | null
   eosFusion?: EosFusionInfo | null
+  /** Whether the planting date was manually confirmed by the user */
+  isPlantingConfirmed?: boolean
+  /** The automatically detected planting date (preserved for reference) */
+  detectedPlantingDate?: string | null
 }
 
 export function PhenologyTimeline({
@@ -42,9 +46,12 @@ export function PhenologyTimeline({
   eosDate,
   method,
   zarcInfo,
-  eosFusion
+  eosFusion,
+  isPlantingConfirmed,
+  detectedPlantingDate
 }: PhenologyTimelineProps) {
   const [showEosTooltip, setShowEosTooltip] = useState(false)
+  const [showPlantingTooltip, setShowPlantingTooltip] = useState(false)
   // Formatar janela ZARC
   const formatZarcDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
@@ -131,21 +138,56 @@ export function PhenologyTimeline({
 
   return (
     <div className="grid md:grid-cols-3 gap-6">
-      {/* Plantio Estimado - com ZARC integrado */}
-      <div className="bg-blue-50 border border-blue-100 p-6 rounded-[24px] shadow-inner">
-        <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-          <Tractor size={14} /> Plantio Estimado
-        </p>
-        <h4 className="text-2xl font-black text-blue-900">
+      {/* Plantio - Estimado ou Confirmado */}
+      <div className={`${isPlantingConfirmed ? 'bg-emerald-50 border-emerald-200' : 'bg-blue-50 border-blue-100'} border p-6 rounded-[24px] shadow-inner`}>
+        <div className="flex items-center justify-between mb-2">
+          <p className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-2 ${isPlantingConfirmed ? 'text-emerald-500' : 'text-blue-400'}`}>
+            <Tractor size={14} /> {isPlantingConfirmed ? 'Plantio Confirmado' : 'Plantio Estimado'}
+          </p>
+          {isPlantingConfirmed && (
+            <div 
+              className="relative"
+              onMouseEnter={() => setShowPlantingTooltip(true)}
+              onMouseLeave={() => setShowPlantingTooltip(false)}
+            >
+              <button className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold text-emerald-600 bg-emerald-100">
+                <CheckCircle size={10} />
+                Manual
+                <Info size={10} className="opacity-60" />
+              </button>
+              {showPlantingTooltip && (
+                <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-slate-200 rounded-xl shadow-xl p-4 z-50 text-left">
+                  <div className="text-xs space-y-2">
+                    <div className="flex items-center gap-2 border-b pb-2">
+                      <CheckCircle size={14} className="text-emerald-500" />
+                      <span className="font-bold text-slate-700">Data informada pelo produtor</span>
+                    </div>
+                    <p className="text-slate-600 text-[11px] leading-relaxed">
+                      A data exibida foi definida manualmente pelo usuário e é utilizada como referência para todos os cálculos agronômicos.
+                    </p>
+                    {detectedPlantingDate && (
+                      <div className="bg-blue-50 border border-blue-100 rounded-lg p-2 mt-1">
+                        <span className="text-[10px] font-bold text-blue-500 uppercase block">Data automática anterior</span>
+                        <span className="text-[12px] font-bold text-blue-800">{formatDate(detectedPlantingDate)}</span>
+                        <span className="text-[10px] text-blue-400 block">Detecção via SOS - 8 dias</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <h4 className={`text-2xl font-black ${isPlantingConfirmed ? 'text-emerald-900' : 'text-blue-900'}`}>
           {plantingDate ? formatDate(plantingDate) : '---'}
         </h4>
-        <p className="text-[10px] text-blue-400 font-bold mt-2 uppercase">
-          Ref: SOS - 8 Dias
+        <p className={`text-[10px] font-bold mt-2 uppercase ${isPlantingConfirmed ? 'text-emerald-400' : 'text-blue-400'}`}>
+          {isPlantingConfirmed ? 'Informado pelo produtor' : 'Ref: SOS - 8 Dias'}
         </p>
         
         {/* ZARC Info integrado */}
         {zarcInfo && (
-          <div className="mt-3 pt-3 border-t border-blue-200">
+          <div className={`mt-3 pt-3 border-t ${isPlantingConfirmed ? 'border-emerald-200' : 'border-blue-200'}`}>
             <div className="flex items-center gap-1.5 text-[10px] text-blue-500 font-bold uppercase tracking-wider">
               <span className="bg-blue-200 text-blue-700 px-1.5 py-0.5 rounded text-[9px]">ZARC</span>
               <span>Janela: {formatZarcDate(zarcInfo.windowStart)} - {formatZarcDate(zarcInfo.windowEnd)}</span>

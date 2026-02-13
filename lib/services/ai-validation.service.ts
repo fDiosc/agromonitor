@@ -4,11 +4,15 @@
  * of algorithmic projections using satellite imagery
  */
 
-import { processImage } from './sentinel1.service'
 import { runCurator, type CuratorInput } from '@/lib/agents/curator'
 import { runVerifier, type VerifierInput } from '@/lib/agents/verifier'
 import { runJudge, type JudgeInput } from '@/lib/agents/judge'
 import { calculateCost, logCostReport, JUDGE_MODEL } from './ai-pricing.service'
+import {
+  getFieldImages,
+  getImagesAsBase64,
+  getBboxFromGeometry,
+} from './field-images.service'
 import type { JudgePromptParams } from '@/lib/agents/judge-prompt'
 import type {
   AgenticImageEntry,
@@ -20,19 +24,10 @@ import type {
   VisualFinding,
   HarvestReadiness,
   RiskAssessment,
-  ImageType,
-  SatelliteCollection,
   CropVerification,
   AgentCostReport,
 } from '@/lib/agents/types'
 import type { CropPatternResult } from './crop-pattern.service'
-import {
-  EVALSCRIPT_TRUE_COLOR,
-  EVALSCRIPT_NDVI,
-  EVALSCRIPT_RADAR,
-  EVALSCRIPT_LANDSAT_NDVI,
-  EVALSCRIPT_S3_NDVI,
-} from '@/lib/evalscripts'
 
 // ==================== Types ====================
 
@@ -102,193 +97,9 @@ export interface AIValidationResult {
   shortCircuited?: boolean
 }
 
-// ==================== Image Fetching ====================
-
-interface ImageFetchPlan {
-  dateFrom: string
-  dateTo: string
-  collection: SatelliteCollection
-  evalscript: string
-  type: ImageType
-}
-
-/**
- * Build a bounding box from GeoJSON geometry
- */
-function getBboxFromGeometry(geometryJson: string): [number, number, number, number] | null {
-  try {
-    const geojson = JSON.parse(geometryJson)
-    let coords: number[][][] = []
-
-    if (geojson.type === 'FeatureCollection') {
-      coords = geojson.features[0]?.geometry?.coordinates || []
-    } else if (geojson.type === 'Feature') {
-      coords = geojson.geometry?.coordinates || []
-    } else if (geojson.type === 'Polygon') {
-      coords = geojson.coordinates || []
-    }
-
-    if (coords.length === 0 || coords[0].length === 0) return null
-
-    const ring = coords[0]
-    let minLon = Infinity, maxLon = -Infinity
-    let minLat = Infinity, maxLat = -Infinity
-
-    for (const point of ring) {
-      minLon = Math.min(minLon, point[0])
-      maxLon = Math.max(maxLon, point[0])
-      minLat = Math.min(minLat, point[1])
-      maxLat = Math.max(maxLat, point[1])
-    }
-
-    return [minLon, minLat, maxLon, maxLat]
-  } catch {
-    return null
-  }
-}
-
-/**
- * Generate date ranges for image fetching (every ~10 days from season start to now)
- */
-function generateDateRanges(seasonStart: string): Array<{ from: string; to: string }> {
-  const start = new Date(seasonStart)
-  const now = new Date()
-  const ranges: Array<{ from: string; to: string }> = []
-
-  const current = new Date(start)
-  while (current < now) {
-    const rangeEnd = new Date(current)
-    rangeEnd.setDate(rangeEnd.getDate() + 5)
-    if (rangeEnd > now) rangeEnd.setTime(now.getTime())
-
-    ranges.push({
-      from: current.toISOString().split('T')[0] + 'T00:00:00Z',
-      to: rangeEnd.toISOString().split('T')[0] + 'T23:59:59Z',
-    })
-
-    current.setDate(current.getDate() + 10)
-  }
-
-  return ranges
-}
-
-/**
- * Fetch satellite images from CDSE Process API
- */
-async function fetchImages(
-  workspaceId: string,
-  bbox: [number, number, number, number],
-  seasonStart: string,
-  areaHa: number,
-): Promise<AgenticImageEntry[]> {
-  const dateRanges = generateDateRanges(seasonStart)
-  const images: AgenticImageEntry[] = []
-
-  // Build fetch plans: for each date range, fetch S2 true color + NDVI, and radar
-  const fetchPlans: ImageFetchPlan[] = []
-
-  for (const range of dateRanges) {
-    // S2 True Color
-    fetchPlans.push({
-      dateFrom: range.from,
-      dateTo: range.to,
-      collection: 'sentinel-2-l2a',
-      evalscript: EVALSCRIPT_TRUE_COLOR,
-      type: 'truecolor',
-    })
-    // S2 NDVI
-    fetchPlans.push({
-      dateFrom: range.from,
-      dateTo: range.to,
-      collection: 'sentinel-2-l2a',
-      evalscript: EVALSCRIPT_NDVI,
-      type: 'ndvi',
-    })
-    // Radar
-    fetchPlans.push({
-      dateFrom: range.from,
-      dateTo: range.to,
-      collection: 'sentinel-1-grd',
-      evalscript: EVALSCRIPT_RADAR,
-      type: 'radar',
-    })
-  }
-
-  // For large fields, also add Landsat NDVI and S3 NDVI at sparser intervals
-  if (areaHa > 200) {
-    for (let i = 0; i < dateRanges.length; i += 2) {
-      const range = dateRanges[i]
-      fetchPlans.push({
-        dateFrom: range.from,
-        dateTo: range.to,
-        collection: 'landsat-ot-l1',
-        evalscript: EVALSCRIPT_LANDSAT_NDVI,
-        type: 'landsat-ndvi',
-      })
-    }
-  }
-  if (areaHa > 500) {
-    for (let i = 0; i < dateRanges.length; i += 3) {
-      const range = dateRanges[i]
-      fetchPlans.push({
-        dateFrom: range.from,
-        dateTo: range.to,
-        collection: 'sentinel-3-olci',
-        evalscript: EVALSCRIPT_S3_NDVI,
-        type: 's3-ndvi',
-      })
-    }
-  }
-
-  console.log(`[AI-VALIDATION] Fetching ${fetchPlans.length} images from CDSE...`)
-
-  // Process in batches of 5 to respect rate limits
-  const BATCH_SIZE = 5
-  for (let i = 0; i < fetchPlans.length; i += BATCH_SIZE) {
-    const batch = fetchPlans.slice(i, i + BATCH_SIZE)
-    const results = await Promise.allSettled(
-      batch.map(async (plan) => {
-        const buffer = await processImage(workspaceId, {
-          bbox,
-          dateFrom: plan.dateFrom,
-          dateTo: plan.dateTo,
-          evalscript: plan.evalscript,
-          dataCollection: plan.collection,
-          width: 512,
-          height: 512,
-        })
-        if (!buffer) return null
-
-        const base64 = buffer.toString('base64')
-        const date = plan.dateFrom.split('T')[0]
-
-        return {
-          date,
-          type: plan.type,
-          base64,
-          metadata: {
-            collection: plan.collection,
-            bbox: [...bbox],
-          },
-        } as AgenticImageEntry
-      })
-    )
-
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value) {
-        images.push(result.value)
-      }
-    }
-
-    // Small delay between batches to respect rate limits
-    if (i + BATCH_SIZE < fetchPlans.length) {
-      await new Promise((r) => setTimeout(r, 500))
-    }
-  }
-
-  console.log(`[AI-VALIDATION] Fetched ${images.length}/${fetchPlans.length} images successfully`)
-  return images
-}
+// ==================== Image Fetching (via shared field-images.service) ====================
+// getBboxFromGeometry, generateDateRanges, and fetchImages logic now live in
+// lib/services/field-images.service.ts and are shared with Visual Analysis.
 
 // ==================== Main Orchestrator ====================
 
@@ -311,9 +122,22 @@ export async function runAIValidation(input: AIValidationInput): Promise<AIValid
     || input.sosDate
     || new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
 
-  // 2. Fetch images from CDSE
+  // 2. Fetch images via shared service (incremental: only new images from CDSE)
   const fetchStart = Date.now()
-  const images = await fetchImages(input.workspaceId, bbox, seasonStart, input.areaHa)
+  const { images: storedImages } = await getFieldImages(
+    input.fieldId,
+    input.workspaceId,
+    input.geometry,
+    {
+      source: 'ai-validation',
+      includeRadar: true,
+      includeLandsat: input.areaHa > 200,
+      includeS3Ndvi: input.areaHa > 500,
+      seasonStart,
+    }
+  )
+  // Download from S3 as base64 for Gemini (Curator/Verifier/Judge need base64)
+  const images = await getImagesAsBase64(storedImages, bbox)
   const fetchMs = Date.now() - fetchStart
 
   if (images.length === 0) {

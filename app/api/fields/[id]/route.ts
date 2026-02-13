@@ -243,6 +243,12 @@ export async function DELETE(
 /**
  * PATCH /api/fields/[id]
  * Atualiza campos específicos de um talhão (nome, produtor, caixa logística)
+ * e campos agronômicos (plantingDateInput, cropType, seasonStartDate, geometryJson)
+ * 
+ * Quando campos agronômicos são alterados:
+ * - Os valores detectados automaticamente (detectedXxx) são PRESERVADOS no AgroData
+ * - Um registro de editHistory é adicionado ao Field
+ * - Um reprocessamento é automaticamente disparado
  */
 export async function PATCH(
   request: NextRequest,
@@ -263,7 +269,11 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { logisticsUnitId, name, producerId } = body
+    const { 
+      logisticsUnitId, name, producerId,
+      // Campos agronômicos editáveis
+      plantingDateInput, cropType, seasonStartDate, geometryJson
+    } = body
 
     // Verificar se o talhão existe e pertence ao workspace
     const existingField = await prisma.field.findFirst({
@@ -323,6 +333,71 @@ export async function PATCH(
       }
     }
 
+    // Validar cropType se fornecido
+    if (cropType !== undefined && !['SOJA', 'MILHO'].includes(cropType)) {
+      return NextResponse.json(
+        { error: 'Cultura inválida. Valores aceitos: SOJA, MILHO' },
+        { status: 400 }
+      )
+    }
+
+    // Validar geometryJson se fornecido
+    if (geometryJson !== undefined) {
+      try {
+        JSON.parse(geometryJson)
+      } catch {
+        return NextResponse.json(
+          { error: 'geometryJson inválido' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Detectar se houve alteração em campos agronômicos
+    const agroChanges: { field: string; oldValue: string; newValue: string }[] = []
+    let needsReprocess = false
+
+    if (plantingDateInput !== undefined) {
+      const oldVal = existingField.plantingDateInput?.toISOString().split('T')[0] || 'null'
+      const newVal = plantingDateInput || 'null'
+      if (oldVal !== newVal) {
+        agroChanges.push({ field: 'plantingDateInput', oldValue: oldVal, newValue: newVal })
+        needsReprocess = true
+      }
+    }
+
+    if (cropType !== undefined && cropType !== existingField.cropType) {
+      agroChanges.push({ field: 'cropType', oldValue: existingField.cropType, newValue: cropType })
+      needsReprocess = true
+    }
+
+    if (seasonStartDate !== undefined) {
+      const oldVal = existingField.seasonStartDate.toISOString().split('T')[0]
+      const newVal = new Date(seasonStartDate).toISOString().split('T')[0]
+      if (oldVal !== newVal) {
+        agroChanges.push({ field: 'seasonStartDate', oldValue: oldVal, newValue: newVal })
+        needsReprocess = true
+      }
+    }
+
+    if (geometryJson !== undefined && geometryJson !== existingField.geometryJson) {
+      agroChanges.push({ field: 'geometryJson', oldValue: '(polígono anterior)', newValue: '(polígono atualizado)' })
+      needsReprocess = true
+    }
+
+    // Construir editHistory
+    let editHistory = existingField.editHistory
+    if (agroChanges.length > 0) {
+      const history = editHistory ? JSON.parse(editHistory) : []
+      history.push({
+        date: new Date().toISOString(),
+        changes: agroChanges,
+        editedBy: session.userId,
+        editedByName: session.name || session.email
+      })
+      editHistory = JSON.stringify(history)
+    }
+
     // Atualizar talhão
     const updatedField = await prisma.field.update({
       where: { id: params.id },
@@ -331,7 +406,18 @@ export async function PATCH(
         ...(producerId !== undefined && { producerId: producerId || null }),
         ...(logisticsUnitId !== undefined && { 
           logisticsUnitId: logisticsUnitId || null 
-        })
+        }),
+        // Campos agronômicos
+        ...(plantingDateInput !== undefined && { 
+          plantingDateInput: plantingDateInput ? new Date(plantingDateInput) : null 
+        }),
+        ...(cropType !== undefined && { cropType }),
+        ...(seasonStartDate !== undefined && { 
+          seasonStartDate: new Date(seasonStartDate) 
+        }),
+        ...(geometryJson !== undefined && { geometryJson }),
+        // Edit history
+        ...(agroChanges.length > 0 && { editHistory }),
       },
       include: {
         logisticsUnit: {
@@ -350,9 +436,29 @@ export async function PATCH(
       })
     }
 
+    // Se houve alteração agronômica, disparar reprocessamento automático
+    let reprocessTriggered = false
+    if (needsReprocess) {
+      console.log(`[PATCH] Alteração agronômica detectada em ${params.id}: ${agroChanges.map(c => c.field).join(', ')}. Disparando reprocessamento.`)
+      
+      // Fire-and-forget reprocessamento
+      fetch(new URL(`/api/fields/${params.id}/process`, request.url).toString(), {
+        method: 'POST',
+        headers: {
+          'Cookie': request.headers.get('cookie') || ''
+        }
+      }).catch(err => {
+        console.error('Erro ao disparar reprocessamento:', err)
+      })
+      
+      reprocessTriggered = true
+    }
+
     return NextResponse.json({ 
       success: true, 
-      field: updatedField 
+      field: updatedField,
+      reprocessTriggered,
+      agroChanges: agroChanges.length > 0 ? agroChanges : undefined
     })
   } catch (error) {
     console.error('Error updating field:', error)

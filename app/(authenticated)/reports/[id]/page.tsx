@@ -19,7 +19,8 @@ import { calculateFusedEos, EosFusionInput, EosFusionResult } from '@/lib/servic
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { ArrowLeft, Loader2, TrendingUp, RefreshCw, CloudRain, Droplets, Satellite, Thermometer, BrainCircuit, MapPin } from 'lucide-react'
+import { ArrowLeft, Loader2, TrendingUp, RefreshCw, CloudRain, Droplets, Satellite, Thermometer, BrainCircuit, MapPin, ScanEye } from 'lucide-react'
+import { VisualAnalysisTab } from '@/components/visual-analysis/VisualAnalysisTab'
 import { Button } from '@/components/ui/button'
 import { ProcessingModal, DEFAULT_PROCESSING_STEPS, ProcessingStep } from '@/contexts/processing-context'
 import {
@@ -1029,6 +1030,30 @@ export default function ReportPage() {
           </div>
         </div>
 
+        {/* ==================== TOP-LEVEL TABS ==================== */}
+        <Tabs defaultValue="relatorio" className="w-full">
+          <TabsList className="w-auto bg-slate-100/80 p-1 rounded-xl border border-slate-200/60">
+            <TabsTrigger
+              value="relatorio"
+              className="flex items-center gap-2 px-6 py-2.5 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold"
+            >
+              <TrendingUp size={16} />
+              Relatório
+            </TabsTrigger>
+            {featureFlags?.enableVisualAnalysis && (
+              <TabsTrigger
+                value="visual"
+                className="flex items-center gap-2 px-6 py-2.5 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold"
+              >
+                <ScanEye size={16} />
+                Análise Visual
+              </TabsTrigger>
+            )}
+          </TabsList>
+
+          {/* ===== TAB: Relatório (all current content) ===== */}
+          <TabsContent value="relatorio" className="space-y-8 mt-6">
+
         {/* ============================================================ */}
         {/* CROP ISSUE DETECTION — drives entire page layout              */}
         {/* When crop identity is in question, EOS/GDD/Volume are invalid */}
@@ -1062,6 +1087,8 @@ export default function ReportPage() {
                 eosDate={hasCropIssue ? null : (eosFusion ? eosFusion.eos.toISOString() : agroData?.eosDate)}
                 method={agroData?.phenologyMethod}
                 zarcInfo={zarcInfo}
+                isPlantingConfirmed={!!field.plantingDateInput}
+                detectedPlantingDate={agroData?.detectedPlantingDate}
                 eosFusion={hasCropIssue ? null : (eosFusion ? {
                   method: eosFusion.method,
                   confidence: eosFusion.confidence,
@@ -1566,6 +1593,16 @@ export default function ReportPage() {
             onReprocessed={fetchData}
           />
         )}
+
+          </TabsContent>
+
+          {/* ===== TAB: Análise Visual (conditional) ===== */}
+          {featureFlags?.enableVisualAnalysis && (
+            <TabsContent value="visual" className="mt-6">
+              <VisualAnalysisTab fieldId={fieldId} />
+            </TabsContent>
+          )}
+        </Tabs>
       </div>
     </>
   )

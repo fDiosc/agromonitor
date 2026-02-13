@@ -24,7 +24,9 @@ import {
   Sparkles,
   Layers,
   Eye,
-  BrainCircuit
+  BrainCircuit,
+  FolderOpen,
+  ScanEye
 } from 'lucide-react'
 
 interface WorkspaceSettings {
@@ -77,6 +79,12 @@ interface FeatureFlags {
   // Credenciais externas
   copernicusClientId: string | null
   copernicusClientSecret: string | null
+
+  // Subtalhões
+  enableSubFields: boolean
+
+  // Análise Visual
+  enableVisualAnalysis: boolean
 }
 
 const DEFAULT_FLAGS: FeatureFlags = {
@@ -110,7 +118,9 @@ const DEFAULT_FLAGS: FeatureFlags = {
   distanceCalculationMethod: 'straight_line',
   googleMapsApiKey: null,
   copernicusClientId: null,
-  copernicusClientSecret: null
+  copernicusClientSecret: null,
+  enableSubFields: false,
+  enableVisualAnalysis: false,
 }
 
 export default function SettingsPage() {
@@ -572,6 +582,24 @@ export default function SettingsPage() {
               checked={flags.enableAIValidation}
               onChange={(v) => updateFlag('enableAIValidation', v)}
               icon={BrainCircuit}
+              badge="NOVO"
+            />
+            
+            <FeatureToggle
+              label="Subtalhões"
+              description="Permite subdividir talhões em subtalhões com análise individual. Cada subtalhão herda propriedades do pai."
+              checked={flags.enableSubFields}
+              onChange={(v) => updateFlag('enableSubFields', v)}
+              icon={FolderOpen}
+              badge="NOVO"
+            />
+            
+            <FeatureToggle
+              label="Análise Visual de Satélite"
+              description="Módulo para navegação e comparação visual de imagens de satélite com slider antes/depois"
+              checked={flags.enableVisualAnalysis}
+              onChange={(v) => updateFlag('enableVisualAnalysis', v)}
+              icon={ScanEye}
               badge="NOVO"
             />
             

@@ -3,11 +3,17 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { FieldTable } from '@/components/fields/field-table'
 import type { Field } from '@/components/fields/field-table'
-import { Loader2, Plus, Filter, X, Warehouse, CheckCircle, Clock, AlertCircle, BrainCircuit, Target, CalendarCheck } from 'lucide-react'
+import { EditFieldModal } from '@/components/modals/EditFieldModal'
+import { Loader2, Plus, Filter, X, Warehouse, CheckCircle, Clock, AlertCircle, BrainCircuit, Target, CalendarCheck, Search, SquareSplitVertical } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 
 interface LogisticsUnit {
+  id: string
+  name: string
+}
+
+interface Producer {
   id: string
   name: string
 }
@@ -18,7 +24,15 @@ export default function DashboardPage() {
   const [deleting, setDeleting] = useState<string | null>(null)
   const [reprocessing, setReprocessing] = useState<string | null>(null)
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Edit modal state
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingField, setEditingField] = useState<Field | null>(null)
+  const [producers, setProducers] = useState<Producer[]>([])
   
+  // Feature flags
+  const [enableSubFields, setEnableSubFields] = useState(false)
+
   // Filtros
   const [logisticsUnits, setLogisticsUnits] = useState<LogisticsUnit[]>([])
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -29,6 +43,8 @@ export default function DashboardPage() {
   const [aiAgreementFilter, setAiAgreementFilter] = useState<string>('all')
   const [confidenceFilter, setConfidenceFilter] = useState<string>('all')
   const [harvestWindowFilter, setHarvestWindowFilter] = useState<string>('all')
+  const [searchQuery, setSearchQuery] = useState<string>('')
+  const [subFieldFilter, setSubFieldFilter] = useState<string>('all')
 
   const fetchFields = useCallback(async () => {
     try {
@@ -70,9 +86,35 @@ export default function DashboardPage() {
     }
   }, [])
 
+  const fetchProducers = useCallback(async () => {
+    try {
+      const res = await fetch('/api/producers')
+      if (res.ok) {
+        const data = await res.json()
+        setProducers(data.producers?.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name })) || [])
+      }
+    } catch (error) {
+      console.error('Error fetching producers:', error)
+    }
+  }, [])
+
+  const fetchSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/workspace/settings')
+      if (res.ok) {
+        const data = await res.json()
+        setEnableSubFields(data.featureFlags?.enableSubFields === true)
+      }
+    } catch (error) {
+      console.error('Error fetching settings:', error)
+    }
+  }, [])
+
   useEffect(() => {
     fetchFields()
     fetchLogisticsUnits()
+    fetchProducers()
+    fetchSettings()
     
     return () => {
       if (pollIntervalRef.current) {
@@ -83,12 +125,38 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Executar apenas uma vez na montagem
 
+  const handleEdit = (field: Field) => {
+    setEditingField(field)
+    setShowEditModal(true)
+  }
+
+  const handleEditSuccess = () => {
+    fetchFields()
+  }
+
   // Filtrar campos
   const filteredFields = useMemo(() => {
     const now = Date.now()
     const DAY = 86400000
 
+    const query = searchQuery.trim().toLowerCase()
+
     return fields.filter(field => {
+      // Filtro de pesquisa por nome do talhão, produtor ou cidade
+      if (query) {
+        const nameMatch = field.name?.toLowerCase().includes(query)
+        const producerMatch = field.producer?.name?.toLowerCase().includes(query)
+        const cityMatch = field.city?.toLowerCase().includes(query)
+        if (!nameMatch && !producerMatch && !cityMatch) return false
+      }
+
+      // Filtro de subtalhões
+      if (subFieldFilter !== 'all') {
+        const hasSub = (field._count?.subFields ?? field.subFields?.length ?? 0) > 0
+        if (subFieldFilter === 'yes' && !hasSub) return false
+        if (subFieldFilter === 'no' && hasSub) return false
+      }
+
       // Filtro de status
       if (statusFilter !== 'all' && field.status !== statusFilter) return false
 
@@ -158,7 +226,7 @@ export default function DashboardPage() {
 
       return true
     })
-  }, [fields, statusFilter, logisticsUnitFilter, assignmentTypeFilter, cropPatternFilter, aiFilter, aiAgreementFilter, confidenceFilter, harvestWindowFilter])
+  }, [fields, searchQuery, subFieldFilter, statusFilter, logisticsUnitFilter, assignmentTypeFilter, cropPatternFilter, aiFilter, aiAgreementFilter, confidenceFilter, harvestWindowFilter])
 
   const handleDelete = async (id: string) => {
     if (!confirm('Tem certeza que deseja excluir este talhão?')) return
@@ -166,7 +234,15 @@ export default function DashboardPage() {
     setDeleting(id)
     try {
       await fetch(`/api/fields/${id}`, { method: 'DELETE' })
-      setFields(prev => prev.filter(f => f.id !== id))
+      // Remove from top-level or from subFields inside parents
+      setFields(prev => prev
+        .filter(f => f.id !== id)
+        .map(f => f.subFields ? {
+          ...f,
+          subFields: f.subFields.filter(sf => sf.id !== id),
+          _count: f._count ? { subFields: Math.max(0, (f._count.subFields || 0) - (f.subFields.some(sf => sf.id === id) ? 1 : 0)) } : f._count
+        } : f)
+      )
     } catch (error) {
       console.error('Error deleting field:', error)
       alert('Erro ao excluir talhão')
@@ -180,10 +256,14 @@ export default function DashboardPage() {
     
     setReprocessing(id)
     
-    // Atualizar status para PROCESSING localmente
-    setFields(prev => prev.map(f => 
-      f.id === id ? { ...f, status: 'PROCESSING' } : f
-    ))
+    // Atualizar status para PROCESSING localmente (parent or sub-field)
+    setFields(prev => prev.map(f => {
+      if (f.id === id) return { ...f, status: 'PROCESSING' }
+      if (f.subFields?.some(sf => sf.id === id)) {
+        return { ...f, subFields: f.subFields.map(sf => sf.id === id ? { ...sf, status: 'PROCESSING' } : sf) }
+      }
+      return f
+    }))
 
     // Iniciar processamento (fire and forget)
     fetch(`/api/fields/${id}/process`, { method: 'POST' })
@@ -197,6 +277,8 @@ export default function DashboardPage() {
   }
 
   const clearFilters = () => {
+    setSearchQuery('')
+    setSubFieldFilter('all')
     setStatusFilter('all')
     setLogisticsUnitFilter('all')
     setAssignmentTypeFilter('all')
@@ -207,7 +289,8 @@ export default function DashboardPage() {
     setHarvestWindowFilter('all')
   }
 
-  const hasActiveFilters = statusFilter !== 'all' || logisticsUnitFilter !== 'all' || assignmentTypeFilter !== 'all'
+  const hasActiveFilters = searchQuery.trim() !== '' || subFieldFilter !== 'all'
+    || statusFilter !== 'all' || logisticsUnitFilter !== 'all' || assignmentTypeFilter !== 'all'
     || cropPatternFilter !== 'all' || aiFilter !== 'all' || aiAgreementFilter !== 'all' || confidenceFilter !== 'all' || harvestWindowFilter !== 'all'
 
   return (
@@ -226,12 +309,57 @@ export default function DashboardPage() {
 
       {/* Filtros */}
       <div className="mb-6 bg-slate-50 rounded-xl border divide-y divide-slate-200">
-        {/* Row 1: Status + Logística */}
+        {/* Row 0: Search + Sub-fields */}
         <div className="flex flex-wrap items-center gap-4 px-4 py-3">
           <div className="flex items-center gap-2 text-sm text-slate-600">
             <Filter size={16} />
             <span className="font-semibold">Filtros</span>
           </div>
+
+          {/* Search */}
+          <div className="relative flex-1 min-w-[200px] max-w-[320px]">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Pesquisar talhão, produtor ou cidade..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[12px] text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
+          {/* Sub-fields filter */}
+          {enableSubFields && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <SquareSplitVertical size={10} className="inline mr-0.5" />Subtalhões:
+              </span>
+              <div className="flex gap-1">
+                {[
+                  { value: 'all', label: 'Todos' },
+                  { value: 'yes', label: 'Sim' },
+                  { value: 'no', label: 'Não' },
+                ].map(opt => (
+                  <button key={opt.value} onClick={() => setSubFieldFilter(opt.value)}
+                    className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                      subFieldFilter === opt.value ? 'bg-blue-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Row 1: Status + Logística */}
+        <div className="flex flex-wrap items-center gap-4 px-4 py-3">
 
           {/* Status */}
           <div className="flex items-center gap-2">
@@ -441,10 +569,37 @@ export default function DashboardPage() {
           fields={filteredFields}
           onDelete={handleDelete}
           onReprocess={handleReprocess}
+          onEdit={handleEdit}
+          enableSubFields={enableSubFields}
           isDeleting={deleting}
           isReprocessing={reprocessing}
         />
       )}
+
+      {/* Edit Field Modal */}
+      <EditFieldModal
+        isOpen={showEditModal}
+        onClose={() => {
+          setShowEditModal(false)
+          setEditingField(null)
+        }}
+        onSuccess={handleEditSuccess}
+        field={editingField ? {
+          id: editingField.id,
+          name: editingField.name,
+          producerId: editingField.producer?.id || null,
+          logisticsUnitId: editingField.logisticsUnit?.id || null,
+          plantingDateInput: editingField.plantingDateInput,
+          cropType: editingField.cropType,
+          seasonStartDate: editingField.seasonStartDate,
+          detectedPlantingDate: editingField.agroData?.detectedPlantingDate,
+          detectedCropType: editingField.agroData?.detectedCropType,
+          detectedConfidence: editingField.agroData?.detectedConfidence,
+          editHistory: editingField.editHistory,
+        } : null}
+        producers={producers}
+        logisticsUnits={logisticsUnits}
+      />
     </div>
   )
 }

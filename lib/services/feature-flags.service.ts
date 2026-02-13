@@ -51,6 +51,12 @@ export interface FeatureFlags {
   aiValidationTrigger: 'MANUAL' | 'ON_PROCESS' | 'ON_LOW_CONFIDENCE'
   aiCuratorModel: string
   showAIValidation: boolean
+
+  // Subtalhões
+  enableSubFields: boolean
+
+  // Análise Visual
+  enableVisualAnalysis: boolean
 }
 
 export interface FeatureFlagsUpdate {
@@ -97,6 +103,12 @@ export interface FeatureFlagsUpdate {
   aiValidationTrigger?: 'MANUAL' | 'ON_PROCESS' | 'ON_LOW_CONFIDENCE'
   aiCuratorModel?: string
   showAIValidation?: boolean
+
+  // Subtalhões
+  enableSubFields?: boolean
+
+  // Análise Visual
+  enableVisualAnalysis?: boolean
 }
 
 // ==================== Default Values ====================
@@ -145,6 +157,12 @@ const DEFAULT_FLAGS: FeatureFlags = {
   aiValidationTrigger: 'MANUAL',
   aiCuratorModel: 'gemini-2.5-flash-lite',
   showAIValidation: true,
+
+  // Subtalhões
+  enableSubFields: false,
+
+  // Análise Visual
+  enableVisualAnalysis: false,
 }
 
 // Campos virtuais que são calculados, não salvos no banco
@@ -224,6 +242,12 @@ export async function getFeatureFlags(workspaceId: string): Promise<FeatureFlags
     aiValidationTrigger: settings.aiValidationTrigger as 'MANUAL' | 'ON_PROCESS' | 'ON_LOW_CONFIDENCE',
     aiCuratorModel: settings.aiCuratorModel,
     showAIValidation: settings.showAIValidation,
+
+    // Subtalhões
+    enableSubFields: settings.enableSubFields,
+
+    // Análise Visual
+    enableVisualAnalysis: settings.enableVisualAnalysis,
   }
 }
 

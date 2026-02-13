@@ -22,12 +22,16 @@ O **MERX AGRO Monitor** é uma plataforma multi-tenant que transforma dados de s
 - **Filtros Avançados (v0.0.31)** - Status, tipo, caixa logística, janela de colheita, confiança, presença/resultado IA
 - **Dashboard Ordenável (v0.0.31)** - 13 colunas individuais com ordenação por clique, padrão por colheita mais próxima
 - **Templates de Análise** - Crédito, Logística, Matriz de Risco
-- **Validação Visual IA (v0.0.29)** - Agentes Curador + Juiz validam imagens de satélite com Gemini multimodal (6 fontes de dados)
+- **Validação Visual IA (v0.0.29+)** - Pipeline de 3 agentes: Curador → Verificador → Juiz validam imagens de satélite com Gemini multimodal (6 fontes de dados)
 - **Fusão EOS Corrigida (v0.0.30)** - Single source of truth: data canônica calculada no servidor
 - **Pipeline de Criticidade de Cultura (v0.0.32)** - Validação algorítmica + IA Verificadora da cultura declarada (8 culturas, 3 categorias)
 - **Sanidade EOS + ATYPICAL (v0.0.33)** - NDVI prevalece sobre GDD em contradições; classificação ATYPICAL para ciclos indefinidos; supressão automática de resultados IA quando cultura é duvidosa
 - **Visualização de Polígono (v0.0.33)** - Modal Leaflet no relatório com mapa satélite/OSM exibindo o polígono do talhão
-- **Feature Flags** - Configuração de módulos por workspace
+- **Análise Visual de Satélite (v0.0.34)** - Aba no relatório do talhão para navegação por imagens de satélite com slider de comparação antes/depois
+- **Persistência S3 (v0.0.34)** - Imagens de satélite armazenadas em AWS S3 com segregação por workspace; compartilhamento entre IA e Análise Visual; fetch incremental
+- **Edição Agronômica (v0.0.34)** - Botão editar no dashboard para ajustar plantio, cultura e safra com reprocessamento; preservação de dados algorítmicos originais
+- **Subtalhões (v0.0.34)** - Hierarquia pai/filho de talhões; desenho de polígonos contidos; análise agrícola individual por subtalhão
+- **Feature Flags** - Configuração de módulos por workspace (incluindo `enableVisualAnalysis`, `enableSubFields`)
 
 ---
 
@@ -61,54 +65,27 @@ npm run dev
 ### Variáveis de Ambiente
 
 ```env
-DATABASE_URL="postgresql://..."
-MERX_API_KEY="sua-chave-merx"
-GEMINI_API_KEY="sua-chave-gemini"
+DATABASE_URL="postgresql://..."      # PostgreSQL connection string
+GEMINI_API_KEY="..."                # Google Gemini API key
+MERX_API_URL="https://homolog.api.merx.tech/api/monitoramento"  # URL da API Merx (default)
+CORS_PROXY_URL="https://corsproxy.io/?"  # URL do proxy CORS (default)
+JWT_SECRET="..."                    # Segredo para assinatura JWT (tem fallback no código)
+
+# Armazenamento S3 (opcional - para persistência de imagens de satélite)
+S3_ACCESS_KEY_ID="..."              # AWS Access Key ID
+S3_SECRET_ACCESS_KEY="..."          # AWS Secret Access Key
+S3_BUCKET="pocs-merxlabs"          # Nome do bucket S3
+S3_REGION="us-east-1"              # Região AWS
+S3_ENDPOINT="..."                  # Endpoint customizado (apenas para R2/MinIO, omitir para AWS S3)
 ```
 
 ---
 
 ## Arquitetura
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         FRONTEND                                 │
-│                    Next.js 14 (App Router)                       │
-│         React + TypeScript + TailwindCSS + Shadcn/ui            │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      API ROUTES (Backend)                        │
-│                   Next.js Route Handlers                         │
-│   /api/fields, /api/logistics, /api/templates, /api/ai-validate │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-           ┌───────────┬───────┼───────┬───────────┐
-           ▼           ▼       ▼       ▼           ▼
-    ┌───────────┐ ┌─────────┐ ┌─────────┐ ┌────────────┐ ┌──────────┐
-    │  Prisma   │ │Merx API │ │Gemini AI│ │Sentinel Hub│ │AI Agents    │
-    │PostgreSQL │ │Satellite│ │Analysis │ │ Process API│ │Curator+     │
-    │  (Neon)   │ │ + Clima │ │Templates│ │  (Images)  │ │Verifier+    │
-    │           │ │         │ │         │ │            │ │Judge        │
-    └───────────┘ └─────────┘ └─────────┘ └────────────┘ └─────────────┘
-```
+O sistema é uma aplicação Next.js 14 (App Router) com frontend React + TypeScript + TailwindCSS + Shadcn/ui, backend via Route Handlers, integração com Prisma/PostgreSQL, Merx API (satélite/clima), Sentinel Hub (imagens), e agentes de IA (Gemini).
 
-### Stack Tecnológica
-
-| Camada | Tecnologia |
-|--------|------------|
-| Frontend | Next.js 14, React 18, TypeScript |
-| Styling | TailwindCSS, Shadcn/ui |
-| Charts | Recharts |
-| Maps | Leaflet, React-Leaflet |
-| ORM | Prisma |
-| Database | PostgreSQL (Neon) |
-| AI (Templates) | Google Gemini 3 Flash Preview |
-| AI (Visual) | Gemini multimodal (Curator + Verifier + Judge agents) |
-| AI (Crop Verifier) | Gemini Flash Lite (verificação visual de cultura) |
-| Satellite Images | Sentinel Hub Process API (Copernicus) |
-| APIs | Merx API (satellite/climate data) |
+Documentação completa: **[ARCHITECTURE.md](./docs/ARCHITECTURE.md)**
 
 ---
 
@@ -119,7 +96,7 @@ merx-agro-mvp/
 ├── app/
 │   ├── (authenticated)/        # Rotas protegidas (requer login)
 │   │   ├── layout.tsx          # Layout com Sidebar
-│   │   ├── page.tsx            # Dashboard principal (Carteira)
+│   │   ├── page.tsx            # Dashboard principal (Carteira) + EditFieldModal
 │   │   ├── admin/
 │   │   │   ├── users/          # Gestão de usuários
 │   │   │   └── workspaces/     # Gestão de workspaces (SUPER_ADMIN)
@@ -129,8 +106,8 @@ merx-agro-mvp/
 │   │   │   ├── logistics/      # Diagnóstico logístico
 │   │   │   └── logistics-units/# Gestão de Caixas Logísticas
 │   │   ├── fields/new/         # Cadastro de talhões
-│   │   ├── settings/           # Configurações do workspace
-│   │   └── reports/[id]/       # Relatórios detalhados
+│   │   ├── settings/           # Configurações do workspace (incl. Visual Analysis, SubFields)
+│   │   └── reports/[id]/       # Relatórios detalhados (Tabs: Relatório + Análise Visual)
 │   ├── login/                  # Página de login
 │   ├── change-password/        # Troca de senha (primeiro acesso)
 │   └── api/
@@ -140,6 +117,9 @@ merx-agro-mvp/
 │       │   └── workspaces/     # CRUD de workspaces
 │       ├── producers/          # CRUD de produtores
 │       ├── fields/             # CRUD de talhões
+│       │   └── [id]/
+│       │       ├── subfields/  # GET/POST subtalhões
+│       │       └── images/     # GET imagens de satélite (URLs assinadas S3)
 │       ├── logistics/          # Diagnóstico logístico
 │       ├── logistics-units/    # Caixas logísticas e cobertura
 │       ├── workspace/          # Configurações do workspace
@@ -148,12 +128,15 @@ merx-agro-mvp/
 │   ├── layout/                 # Sidebar, AppLayout, Changelog
 │   ├── fields/                 # Componentes de talhões (field-table com colunas Cultura+Status)
 │   ├── modals/                 # Modais (Disclaimer, EditField, FieldMapModal)
+│   ├── maps/                   # SubFieldMap (Leaflet + leaflet-draw)
+│   ├── visual-analysis/        # ImageComparisonSlider, VisualAnalysisTab
 │   ├── map/                    # Componentes de mapa (MapDrawer)
 │   └── ui/                     # Shadcn/ui components
 ├── lib/
 │   ├── auth.ts                 # Utilitários de autenticação (JWT)
 │   ├── version.ts              # Versão e changelog
 │   ├── prisma.ts               # Cliente Prisma
+│   ├── s3.ts                   # Cliente AWS S3 (upload, download, presigned URLs)
 │   ├── agents/                 # Agentes de IA (Visual Validation)
 │   │   ├── curator.ts          # Agente Curador (seleção de imagens)
 │   │   ├── verifier.ts         # Agente Verificador (confirmação visual de cultura)
@@ -165,6 +148,7 @@ merx-agro-mvp/
 │   │   └── evalscripts/        # Scripts Sentinel Hub (NDVI, True Color, Radar)
 │   └── services/               # Serviços de negócio
 │       ├── ai-validation.service.ts     # Orquestrador da validação visual IA (Curator→Verifier→Judge)
+│       ├── field-images.service.ts      # Serviço compartilhado de imagens (S3 + Sentinel Hub)
 │       ├── crop-pattern.service.ts      # Análise algorítmica de padrão de cultura (v0.0.32)
 │       ├── eos-fusion.service.ts        # Fusão EOS (NDVI + GDD + Hídrico, sanity check v0.0.33)
 │       ├── thermal.service.ts           # Soma térmica (GDD)
@@ -177,7 +161,7 @@ merx-agro-mvp/
 │       ├── distance.service.ts          # Cálculo de distâncias
 │       └── logistics-distance.service.ts # Persistência de distâncias
 ├── prisma/
-│   ├── schema.prisma           # Schema do banco
+│   ├── schema.prisma           # Schema do banco (incl. FieldImage, sub-fields, detected*)
 │   └── seed.ts                 # Seed inicial
 └── middleware.ts               # Proteção de rotas
 ```
@@ -188,33 +172,33 @@ merx-agro-mvp/
 
 | Documento | Descrição | Status |
 |-----------|-----------|--------|
-| [README.md](./README.md) | Este documento - visão geral | ✅ Atualizado (12/02) |
-| [CHANGELOG.md](./CHANGELOG.md) | Histórico de mudanças | ✅ Atualizado (12/02) |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Arquitetura detalhada | ✅ Atualizado (12/02) |
-| [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md) | **Metodologia V2** (v4.1) - Fusão EOS, GDD, Crop Criticality, IA Visual | ✅ Atualizado (12/02) |
-| [METHODOLOGY.md](./METHODOLOGY.md) | Metodologias técnicas | ✅ Atualizado (12/02) |
-| [DIAGNOSTICOLOG.md](./DIAGNOSTICOLOG.md) | Especificação módulo logístico | ✅ Atualizado |
-| [REFATORACAO1.md](./REFATORACAO1.md) | Plano de multi-tenancy e auth | ✅ Concluído |
+| [README.md](./README.md) | Este documento - visão geral | ✅ Atualizado (v0.0.34) |
+| [CHANGELOG.md](./CHANGELOG.md) | Histórico de mudanças | ✅ Atualizado (v0.0.34) |
+| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | Arquitetura detalhada | ✅ Atualizado (v0.0.34) |
+| [METHODOLOGY.md](./docs/METHODOLOGY.md) | **Metodologia unificada** - Fenologia, Fusão EOS, GDD, Criticidade, IA Visual | ✅ Atualizado (v0.0.33) |
+| [Apisproject.md](./docs/Apisproject.md) | Documentação completa de APIs (internas e externas) | ✅ Atualizado (v0.0.34) |
+| [DEPLOY.md](./docs/DEPLOY.md) | Guia de deploy em produção | ✅ Atualizado (v0.0.34) |
+| [DIAGNOSTICOLOG.md](./docs/DIAGNOSTICOLOG.md) | Especificação módulo logístico | ✅ Atualizado |
 
 ### Documentos Técnicos (pasta /docs)
 
 | Documento | Descrição | Status |
 |-----------|-----------|--------|
-| [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md) | Metodologia V2 (v4.1) - Fusão EOS, Crop Criticality, IA 3-Agent | ✅ Atualizado (12/02) |
-| [docs/PLAN-AI-VISUAL-VALIDATION.md](./docs/PLAN-AI-VISUAL-VALIDATION.md) | Plano de validação visual IA (Curador + Verificador + Juiz) | ✅ Concluído |
-| [docs/PLAN-HYBRID-ANALYSIS.md](./docs/PLAN-HYBRID-ANALYSIS.md) | Plano de análise híbrida | ✅ Concluído |
-| [docs/PLAN-REPROCESS-ANALYSIS.md](./docs/PLAN-REPROCESS-ANALYSIS.md) | Plano de reprocessamento | ✅ Concluído |
-| [docs/PLAN-ZARC-ALIGNMENT.md](./docs/PLAN-ZARC-ALIGNMENT.md) | Alinhamento ZARC | ✅ Concluído |
-| [docs/REPORT-MERX-NDVI-GAP.md](./docs/REPORT-MERX-NDVI-GAP.md) | Relatório técnico: gap de dados NDVI | ✅ Concluído |
+| [Apisproject.md](./docs/Apisproject.md) | APIs externas (Merx, Copernicus, Gemini, S3) + internas (35+ endpoints) | ✅ Atualizado (v0.0.34) |
+| [REPORT-MERX-NDVI-GAP.md](./docs/REPORT-MERX-NDVI-GAP.md) | Relatório técnico: gap de dados NDVI | ✅ Concluído |
 
-### Documentos Legados (raiz do projeto)
+### Documentos Arquivados (docs/archive/)
+
+Planos concluídos e documentos substituídos, mantidos para referência histórica: METHODOLOGY-V2, REFATORACAO1, PLAN-AI-VISUAL-VALIDATION, PLAN-HYBRID-ANALYSIS, PLAN-REPROCESS-ANALYSIS, PLAN-ZARC-ALIGNMENT.
+
+### Documentos Legados (docs/archive/)
 
 | Documento | Descrição | Status |
 |-----------|-----------|--------|
-| [../produto.md](../produto.md) | Visão original do produto | 📦 Legado |
-| [../melhorias.md](../melhorias.md) | Análise de melhorias | 📦 Legado |
-| [../IMPLEMENTACAO.md](../IMPLEMENTACAO.md) | Plano de implementação | 📦 Legado |
-| [../logic.md](../logic.md) | Melhorias de lógica | 📦 Legado |
+| produto.md | Visão original do produto | 📦 Arquivado |
+| melhorias.md | Análise de melhorias | 📦 Arquivado |
+| IMPLEMENTACAO.md | Plano de implementação | 📦 Arquivado |
+| logic.md | Melhorias de lógica | 📦 Arquivado |
 
 ---
 
@@ -381,14 +365,15 @@ Algoritmo científico para previsão de data de colheita com **Single Source of 
 - Comparativo NDVI vs GDD em tempo real
 - Alertas de divergência automáticos
 
-> Documentação completa: [docs/METHODOLOGY-V2.md](./docs/METHODOLOGY-V2.md)
+> Documentação completa: [METHODOLOGY.md](./docs/METHODOLOGY.md) seções 8-10
 
-### 8. Validação Visual por IA (v0.0.29)
+### 8. Validação Visual por IA (v0.0.29+)
 
 Pipeline de validação visual que usa IA multimodal para confirmar ou questionar projeções algorítmicas:
 
-**Arquitetura de Agentes:**
+**Arquitetura de 3 Agentes:**
 - **Curador**: Seleciona e pontua as melhores imagens de satélite (True Color, NDVI, Radar)
+- **Verificador**: Confirma se a cultura declarada corresponde ao observado visualmente (condicional)
 - **Juiz**: Valida projeções algorítmicas usando visão computacional multimodal
 
 **Modelos IA:**
@@ -425,7 +410,62 @@ Pipeline de validação visual que usa IA multimodal para confirmar ou questiona
 - `aiCuratorModel` - Modelo do Curador
 - `showAIValidation` - Mostrar painel no relatório
 
-> Documentação completa: [docs/PLAN-AI-VISUAL-VALIDATION.md](./docs/PLAN-AI-VISUAL-VALIDATION.md)
+> Documentação completa: [PLAN-AI-VISUAL-VALIDATION.md](./docs/archive/PLAN-AI-VISUAL-VALIDATION.md)
+
+### 9. Análise Visual de Satélite (v0.0.34)
+
+Módulo de análise visual integrado como aba no relatório do talhão:
+
+**Funcionalidades:**
+- **Navegação de Imagens**: Timeline com todas as datas de satélite disponíveis
+- **Toggle de Tipo**: Alternar entre True Color (RGB) e NDVI
+- **Slider de Comparação**: Arrastar para comparar duas datas lado a lado (before/after)
+- **Refresh Incremental**: Buscar apenas imagens novas (datas ainda não persistidas)
+- **Compartilhamento com IA**: Mesmas imagens alimentam tanto a Análise Visual quanto a Validação por IA
+
+**Infraestrutura de Imagens (S3):**
+- Imagens persistidas em AWS S3 com path: `agro-monitor/{workspaceId}/fields/{fieldId}/{date}_{type}_{collection}.png`
+- Metadados salvos no modelo `FieldImage` (Prisma)
+- URLs assinadas (presigned) para visualização no frontend
+- Segregação completa por workspace
+
+**Configuração:**
+- `enableVisualAnalysis` - Habilitar aba de Análise Visual no relatório
+
+### 10. Edição de Dados Agronômicos (v0.0.34)
+
+Permite ajustar dados agronômicos após o cadastro do talhão:
+
+**Campos Editáveis:**
+- Data de plantio (`plantingDateInput`)
+- Tipo de cultura (`cropType`)
+- Data de início da safra (`seasonStartDate`)
+- Geometria (`geometryJson`)
+
+**Comportamento:**
+- Alterações agronômicas disparam reprocessamento automático
+- Dados detectados algoritmicamente são **preservados** (campos `detected*` no `AgroData`)
+- Histórico de edições registrado em `editHistory` (JSON com timestamp, campo, valor anterior e novo)
+- Dashboard exibe badge "editado" para talhões com histórico
+
+### 11. Subtalhões (v0.0.34)
+
+Hierarquia pai/filho de talhões para análise granular:
+
+**Funcionalidades:**
+- Talhão pai pode ter N subtalhões com polígonos contidos no pai
+- Nomeação automática (Talhão 1, Talhão 2...) com possibilidade de renomear
+- Herança de cultura do pai, ajustável por subtalhão
+- Análise agrícola passa a nível de subtalhão quando existem filhos
+- Dashboard exibe visão folder-like (pai como pasta, filhos como itens)
+- Mapa do subtalhão destaca polígono do filho, exibe irmãos e geometria do pai
+
+**Validação:**
+- Geometria do subtalhão deve estar contida no polígono pai (`@turf/boolean-contains`)
+- Talhão pai com subtalhões não pode ser reprocessado diretamente
+
+**Configuração:**
+- `enableSubFields` - Habilitar funcionalidade de subtalhões
 
 ---
 
@@ -443,87 +483,15 @@ Pipeline de validação visual que usa IA multimodal para confirmar ou questiona
 
 ## API Endpoints
 
-### Autenticação
+| Grupo | Descrição |
+|-------|-----------|
+| **Auth** | `/api/auth/*` — Login, logout, troca de senha, me |
+| **Fields** | `/api/fields/*` — CRUD talhões, processamento, análise, subtalhões, imagens |
+| **Producers** | `/api/producers/*` — CRUD produtores |
+| **Logistics** | `/api/logistics/*`, `/api/logistics-units/*` — Diagnóstico e caixas logísticas |
+| **Admin** | `/api/admin/*` — Usuários, workspaces (SUPER_ADMIN) |
 
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| POST | `/api/auth/login` | Login com email/senha |
-| POST | `/api/auth/logout` | Encerrar sessão |
-| POST | `/api/auth/change-password` | Trocar senha |
-| GET | `/api/auth/me` | Dados do usuário logado |
-
-### Talhões (requer autenticação)
-
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| GET | `/api/fields` | Listar talhões (do workspace) |
-| POST | `/api/fields` | Criar talhão |
-| GET | `/api/fields/[id]` | Detalhes do talhão |
-| DELETE | `/api/fields/[id]` | Excluir talhão |
-| POST | `/api/fields/[id]/process` | Processar talhão |
-| POST | `/api/fields/[id]/analyze/[templateId]` | Executar análise |
-
-### Produtores
-
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| GET | `/api/producers` | Listar produtores (do workspace) |
-| POST | `/api/producers` | Criar produtor |
-| GET | `/api/producers/[id]` | Detalhes do produtor |
-| PUT | `/api/producers/[id]` | Atualizar produtor |
-| DELETE | `/api/producers/[id]` | Excluir produtor |
-
-### Diagnóstico Logístico
-
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| GET | `/api/logistics/diagnostic` | Dados agregados (do workspace) |
-
-### Caixas Logísticas
-
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| GET | `/api/logistics-units` | Listar caixas logísticas |
-| POST | `/api/logistics-units` | Criar caixa logística |
-| GET | `/api/logistics-units/[id]` | Detalhes da caixa |
-| PUT | `/api/logistics-units/[id]` | Atualizar caixa |
-| DELETE | `/api/logistics-units/[id]` | Excluir/desativar caixa |
-| GET | `/api/logistics-units/coverage` | Relatório de cobertura |
-| POST | `/api/logistics-units/reprocess` | Reprocessar distâncias |
-
-### Admin - Usuários (ADMIN/SUPER_ADMIN)
-
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| GET | `/api/admin/users` | Listar usuários do workspace |
-| POST | `/api/admin/users` | Criar usuário |
-| GET | `/api/admin/users/[id]` | Detalhes do usuário |
-| PUT | `/api/admin/users/[id]` | Atualizar usuário |
-| DELETE | `/api/admin/users/[id]` | Excluir usuário |
-| POST | `/api/admin/users/[id]/reset-password` | Resetar senha |
-
-### Admin - Workspaces (SUPER_ADMIN)
-
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| GET | `/api/admin/workspaces` | Listar todos workspaces |
-| POST | `/api/admin/workspaces` | Criar workspace (com admin opcional) |
-| GET | `/api/admin/workspaces/[id]` | Detalhes do workspace |
-| PUT | `/api/admin/workspaces/[id]` | Atualizar workspace |
-| DELETE | `/api/admin/workspaces/[id]` | Excluir workspace |
-
-### Validação Visual IA
-
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| POST | `/api/fields/[id]/ai-validate` | Executar validação visual IA (manual) |
-
-### Utilitários
-
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| GET | `/api/admin/fix-status` | Preview de status inconsistentes |
-| POST | `/api/admin/fix-status` | Corrigir status |
+Documentação completa: **[docs/Apisproject.md](./docs/Apisproject.md)**
 
 ---
 

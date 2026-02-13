@@ -38,15 +38,32 @@ export async function POST(
   const startTime = Date.now()
 
   try {
-    // Buscar talhão
+    // Buscar talhão com contagem de subtalhões
     const field = await prisma.field.findUnique({
-      where: { id: params.id }
+      where: { id: params.id },
+      include: {
+        _count: {
+          select: { subFields: true }
+        }
+      }
     })
 
     if (!field) {
       return NextResponse.json(
         { error: 'Talhão não encontrado' },
         { status: 404 }
+      )
+    }
+
+    // Se o talhão pai tem subtalhões, a análise deve ser feita nos filhos
+    if (field._count.subFields > 0) {
+      return NextResponse.json(
+        { 
+          error: 'Este talhão possui subtalhões. A análise agronômica deve ser feita nos subtalhões individualmente.',
+          hasSubFields: true,
+          subFieldCount: field._count.subFields
+        },
+        { status: 400 }
       )
     }
 
@@ -72,25 +89,38 @@ export async function POST(
         areaHa = calculateSphericalArea(coords)
       }
 
-      // Calcular fenologia
-      // Se o produtor informou a data de plantio, passar para o serviço
-      const plantingDateInput = field.plantingDateInput 
-        ? field.plantingDateInput.toISOString().split('T')[0] 
-        : null
-      
-      const phenology = calculatePhenology(
+      // =======================================================
+      // FENOLOGIA: Primeiro calcular valores DETECTADOS (sem input)
+      // para preservar os dados do algoritmo para melhoria futura
+      // =======================================================
+      const detectedPhenology = calculatePhenology(
         merxReport.ndvi,
         merxReport.historical_ndvi,
         { 
           crop: field.cropType, 
           areaHa,
-          plantingDateInput 
+          plantingDateInput: null // Sempre sem input para detecção pura
         }
       )
+
+      // Calcular fenologia EFETIVA (com plantingDateInput se disponível)
+      const plantingDateInput = field.plantingDateInput 
+        ? field.plantingDateInput.toISOString().split('T')[0] 
+        : null
+      
+      // Se há input, rodar novamente com input; senão, reutilizar detecção
+      const phenology = plantingDateInput 
+        ? calculatePhenology(
+            merxReport.ndvi,
+            merxReport.historical_ndvi,
+            { crop: field.cropType, areaHa, plantingDateInput }
+          )
+        : detectedPhenology
       
       // Log se plantio foi informado
       if (plantingDateInput) {
         console.log(`[PROCESS] Data de plantio informada pelo produtor: ${plantingDateInput}`)
+        console.log(`[PROCESS] Detected vs Effective planting: ${detectedPhenology.plantingDate} vs ${phenology.plantingDate}`)
       }
 
       // =======================================================
@@ -872,6 +902,18 @@ export async function POST(
         }
       }
 
+      // Campos de detecção automática (NUNCA sobrescritos por edição manual)
+      const detectedFields = {
+        detectedPlantingDate: detectedPhenology.plantingDate ? new Date(detectedPhenology.plantingDate) : null,
+        detectedSosDate: detectedPhenology.sosDate ? new Date(detectedPhenology.sosDate) : null,
+        detectedEosDate: detectedPhenology.eosDate ? new Date(detectedPhenology.eosDate) : null,
+        detectedPeakDate: detectedPhenology.peakDate ? new Date(detectedPhenology.peakDate) : null,
+        detectedCycleDays: detectedPhenology.cycleDays,
+        detectedCropType: field.cropType,
+        detectedConfidence: detectedPhenology.confidence,
+        detectedConfidenceScore: detectedPhenology.confidenceScore,
+      }
+
       // Salvar ou atualizar AgroData
       await prisma.agroData.upsert({
         where: { fieldId: params.id },
@@ -892,6 +934,8 @@ export async function POST(
           yieldEstimateKgHa: phenology.yieldEstimateKgHa,
           phenologyHealth: phenology.phenologyHealth,
           peakNdvi: phenology.peakNdvi,
+          // Valores detectados automaticamente (preservados)
+          ...detectedFields,
           rawNdviData: JSON.stringify(merxReport.ndvi),
           rawPrecipData: precipitationData || JSON.stringify(merxReport.precipitacao),
           rawSoilData: JSON.stringify(merxReport.solo),
@@ -956,6 +1000,8 @@ export async function POST(
           yieldEstimateKgHa: phenology.yieldEstimateKgHa,
           phenologyHealth: phenology.phenologyHealth,
           peakNdvi: phenology.peakNdvi,
+          // Valores detectados automaticamente (preservados)
+          ...detectedFields,
           rawNdviData: JSON.stringify(merxReport.ndvi),
           rawPrecipData: precipitationData || JSON.stringify(merxReport.precipitacao),
           rawSoilData: JSON.stringify(merxReport.solo),

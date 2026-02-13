@@ -22,6 +22,68 @@ Versão em desenvolvimento ativo. Pode haver bugs, indisponibilidades e perda de
 
 ---
 
+## [0.0.35] - 2026-02-13
+
+### Visão Folder de Subtalhões no Dashboard, Pesquisa e Filtros
+
+Implementação da visualização hierárquica de subtalhões no dashboard com padrão folder (expand/collapse), pesquisa textual por nome/produtor/cidade, e filtro por presença de subtalhões.
+
+#### Adicionado
+
+- **Visão Folder de Subtalhões**: Talhões pai com subtalhões exibem ícone `FolderOpen` clicável com chevron de expand/collapse. Ao expandir, subtalhões aparecem como linhas indentadas (`└`) com background azulado (`bg-blue-50/40`), ícone `SquareSplitVertical`, nome do pai como referência, e ações independentes (reprocessar, ver relatório, excluir). Badge "N sub" visível quando recolhido
+- **Pesquisa Textual no Dashboard**: Campo de busca que filtra por nome do talhão, nome do produtor e cidade. Input com ícone `Search`, botão de limpar (`X`) e placeholder descritivo
+- **Filtro de Subtalhões**: Filtro toggle "Subtalhões: Todos | Sim | Não" condicional ao feature flag `enableSubFields`. Permite isolar talhões que possuem ou não subtalhões cadastrados
+
+#### Alterado
+
+- **`app/api/fields/route.ts`**: GET agora inclui `subFields` completos (com agroData) inline no response de cada campo pai. Lógica de processamento de `agroData` extraída para função reutilizável `processAgroData()` aplicada tanto ao pai quanto aos filhos
+- **`components/fields/field-table.tsx`**: Refatorado de render inline para componentes `FieldRows` (pai + filhos) e `FieldRowCells` (linha individual). Adicionado estado `expandedParents` com `Set<string>`. Subtalhões herdam todas as colunas de dados (status, área, volume, emergência, colheita, confiança, cultura, crop pattern, IA)
+- **`app/(authenticated)/page.tsx`**: Adicionados estados `searchQuery` e `subFieldFilter`. `filteredFields` agora aplica pesquisa textual (nome, produtor, cidade) e filtro de subtalhões antes dos filtros existentes. `clearFilters` e `hasActiveFilters` atualizados. `handleDelete` e `handleReprocess` atualizados para operar em subtalhões aninhados no state local
+
+---
+
+## [0.0.34] - 2026-02-12
+
+### Análise Visual, Persistência S3, Edição Agronômica e Subtalhões
+
+Release com 3 novos módulos: Análise Visual de satélite integrada ao relatório, edição de dados agronômicos com preservação de detecções algorítmicas, e hierarquia de subtalhões. Infraestrutura de armazenamento S3 para persistência de imagens de satélite com compartilhamento entre IA e Análise Visual.
+
+#### Adicionado
+
+- **Análise Visual (Tab no Relatório)**: Nova aba "Análise Visual" no relatório do talhão (`reports/[id]/page.tsx`) usando Radix UI Tabs. Permite navegação por todas as imagens de satélite disponíveis com toggle entre Cor Real e NDVI. Habilitável via feature flag `enableVisualAnalysis` no settings do workspace
+- **Slider de Comparação**: Componente `ImageComparisonSlider.tsx` para comparação antes/depois de imagens de satélite com slider arrastável. Usa `ResizeObserver` para dimensionamento responsivo
+- **Timeline de Datas**: Navegação sequencial por todas as datas disponíveis com indicador de posição e formatação pt-BR
+- **Persistência S3**: Infraestrutura completa de armazenamento em AWS S3 (`lib/s3.ts`) com segregação por workspace (`agro-monitor/{workspaceId}/fields/{fieldId}/`)
+- **Modelo FieldImage**: Novo modelo Prisma para metadados de imagens persistidas (fieldId, date, type, collection, s3Key, source). Constraint unique `[fieldId, date, type, collection]` evita duplicatas
+- **Serviço Compartilhado de Imagens**: `lib/services/field-images.service.ts` centraliza fetch, armazenamento e recuperação de imagens para IA Validation e Análise Visual. Fetch incremental busca apenas datas novas
+- **Edição de Dados Agronômicos**: Botão "Editar" no dashboard abre `EditFieldModal.tsx` com abas "Geral" e "Agronômico". Campos editáveis: `plantingDateInput`, `cropType`, `seasonStartDate`, `geometryJson`. Alterações agronômicas disparam reprocessamento automático
+- **Preservação de Detecções Algorítmicas**: Campos `detected*` adicionados ao modelo `AgroData` (`detectedPlantingDate`, `detectedSosDate`, `detectedEosDate`, `detectedPeakDate`, `detectedCycleDays`, `detectedCropType`, `detectedConfidence`, `detectedConfidenceScore`). Processamento executa cálculo de fenologia duas vezes: uma para detecções (preservadas) e outra para valores efetivos (considerando input do usuário)
+- **Histórico de Edições**: Campo `editHistory` (JSON) no modelo `Field` registra cada alteração agronômica com timestamp, campo, valor anterior e novo valor
+- **Subtalhões**: Hierarquia pai/filho de talhões com campo `parentFieldId` e relação auto-referenciada no modelo `Field`. API `POST /api/fields/[id]/subfields` com validação de geometria contida no pai (`@turf/boolean-contains`), nomeação automática e herança de propriedades
+- **Mapa de Subtalhões**: Componente `SubFieldMap.tsx` com Leaflet e leaflet-draw para desenho de polígonos de subtalhões dentro do pai
+- **Feature Flags**: `enableVisualAnalysis` e `enableSubFields` adicionados ao `WorkspaceSettings` e configuráveis na tela de settings
+
+#### Alterado
+
+- **`ai-validation.service.ts`**: Refatorado para usar `field-images.service.ts` compartilhado. Imagens são buscadas incrementalmente do S3/CDSE e preparadas como base64 para Gemini
+- **`app/api/fields/[id]/images/route.ts`**: Retorna URLs assinadas do S3 (não mais base64). Suporta `?refresh=true` para fetch incremental. Fallback null-safe para `seasonStartDate`
+- **`app/api/fields/[id]/route.ts`**: PATCH estendido para aceitar edição agronômica com log em `editHistory` e trigger de reprocessamento background
+- **`app/api/fields/route.ts`**: GET inclui `seasonStartDate`, `editHistory`, `parentFieldId`, `_count.subFields` e campos `detected*` do `AgroData`. Filtra por talhões raiz por padrão
+- **`app/api/fields/[id]/process/route.ts`**: Executa `calculatePhenology` duas vezes (detecção + efetivo). Impede processamento de talhão pai com subtalhões
+- **`reports/[id]/page.tsx`**: Reestruturado com Radix UI Tabs (Relatório + Análise Visual). Tab visual condicional via feature flag
+- **`field-table.tsx`**: Adicionado botão "Editar", ícone `FolderOpen` para talhões pai, badge "editado" para campos com histórico de edição
+- **`FieldMapModal.tsx`**: Suporte a exibição de `parentGeometry` e `siblings` com estilos distintos
+- **`feature-flags.service.ts`**: Interfaces e defaults atualizados com `enableSubFields` e `enableVisualAnalysis`
+
+#### Dependências
+
+- `@aws-sdk/client-s3` — Cliente AWS S3
+- `@aws-sdk/s3-request-presigner` — Geração de URLs assinadas
+- `@turf/boolean-contains` — Validação de geometria contida
+- `@turf/helpers` — Utilitários GeoJSON
+
+---
+
 ## [0.0.33] - 2026-02-12
 
 ### Sanidade EOS, Refinamento ATYPICAL e Supressão IA para Crop Issues

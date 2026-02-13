@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.0.33'
+export const APP_VERSION = '0.0.34'
 
 // Fases do produto
 export const VERSION_PHASES = {
@@ -25,6 +25,24 @@ export const CHANGELOG: ChangelogEntry[] = [
   // ==================== ALPHA (0.0.x) ====================
   // Changelog consolidado - apenas features finais implementadas
   
+  {
+    version: '0.0.34',
+    date: '2026-02-12',
+    title: 'Análise Visual + Persistência S3 + Edição Agronômica + Subtalhões',
+    type: 'feature',
+    changes: [
+      'Análise Visual: nova aba no relatório do talhão para navegação de imagens de satélite',
+      'Persistência S3: imagens de satélite armazenadas em AWS S3 com segregação por workspace',
+      'Fetch Incremental: serviço compartilhado busca apenas datas novas, compartilha imagens entre IA e Visual',
+      'Slider de Comparação: componente antes/depois para comparar imagens de datas diferentes',
+      'Timeline de datas: navegação por todas as datas disponíveis com toggle Cor Real/NDVI',
+      'Edição Agronômica: botão editar no dashboard para ajustar plantio, cultura e safra com reprocessamento',
+      'Histórico de Edições: dados detectados automaticamente preservados para melhoria de algoritmos',
+      'Subtalhões: hierarquia pai/filho de talhões com desenho de polígonos contidos no pai',
+      'Feature Flags: enableVisualAnalysis e enableSubFields configuráveis por workspace',
+      'Modelo FieldImage: persistência de metadados de imagens no banco com referência S3',
+    ],
+  },
   {
     version: '0.0.33',
     date: '2026-02-12',

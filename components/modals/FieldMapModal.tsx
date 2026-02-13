@@ -3,15 +3,26 @@
 import { useEffect, useRef, useState } from 'react'
 import { X, Loader2, Map, Maximize2, Minimize2 } from 'lucide-react'
 
+interface SiblingField {
+  id: string
+  name: string
+  geometryJson: string
+  isSelected: boolean // true = this is the main field being viewed
+}
+
 interface FieldMapModalProps {
   isOpen: boolean
   onClose: () => void
   geometryJson: string
   fieldName: string
   areaHa?: number | null
+  // Optional: parent polygon (for subfield view)
+  parentGeometry?: string | null
+  // Optional: sibling subfields (for multi-polygon view)
+  siblings?: SiblingField[]
 }
 
-export function FieldMapModal({ isOpen, onClose, geometryJson, fieldName, areaHa }: FieldMapModalProps) {
+export function FieldMapModal({ isOpen, onClose, geometryJson, fieldName, areaHa, parentGeometry, siblings }: FieldMapModalProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<any>(null)
   const isInitializedRef = useRef(false)
@@ -75,23 +86,78 @@ export function FieldMapModal({ isOpen, onClose, geometryJson, fieldName, areaHa
           { position: 'topright', collapsed: false }
         ).addTo(map)
 
-        // Parse and add the GeoJSON polygon
+        // Parse and add the GeoJSON polygon(s)
         try {
-          const geojsonData = JSON.parse(geometryJson)
+          // If parent geometry provided, draw it as dashed outline
+          if (parentGeometry) {
+            try {
+              const parentData = JSON.parse(parentGeometry)
+              L.geoJSON(parentData, {
+                style: {
+                  fillColor: '#94a3b8',
+                  fillOpacity: 0.05,
+                  color: '#94a3b8',
+                  weight: 3,
+                  dashArray: '8,6',
+                },
+              }).addTo(map)
+            } catch { /* ignore parent parse error */ }
+          }
 
+          // If siblings provided, draw them
+          if (siblings && siblings.length > 0) {
+            const sibColors = ['#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316']
+            siblings.forEach((sib, idx) => {
+              try {
+                const sibData = JSON.parse(sib.geometryJson)
+                L.geoJSON(sibData, {
+                  style: sib.isSelected ? {
+                    fillColor: '#10b981',
+                    fillOpacity: 0.35,
+                    color: '#059669',
+                    weight: 3,
+                  } : {
+                    fillColor: sibColors[idx % sibColors.length],
+                    fillOpacity: 0.15,
+                    color: sibColors[idx % sibColors.length],
+                    weight: 1.5,
+                  },
+                }).addTo(map).bindTooltip(sib.name, {
+                  permanent: true,
+                  direction: 'center',
+                  className: 'subfield-tooltip',
+                })
+              } catch { /* ignore */ }
+            })
+          }
+
+          // Main field polygon
+          const geojsonData = JSON.parse(geometryJson)
           const geoJsonLayer = L.geoJSON(geojsonData, {
             style: {
               fillColor: '#10b981',
-              fillOpacity: 0.25,
+              fillOpacity: siblings ? 0.35 : 0.25,
               color: '#059669',
-              weight: 2,
+              weight: siblings ? 3 : 2,
             },
           }).addTo(map)
 
-          // Fit map bounds to the polygon with padding
-          const bounds = geoJsonLayer.getBounds()
-          if (bounds.isValid()) {
-            map.fitBounds(bounds, { padding: [40, 40] })
+          // Fit to parent if available, otherwise to main polygon
+          if (parentGeometry) {
+            try {
+              const parentBounds = L.geoJSON(JSON.parse(parentGeometry)).getBounds()
+              if (parentBounds.isValid()) {
+                map.fitBounds(parentBounds, { padding: [40, 40] })
+              }
+            } catch {
+              const bounds = geoJsonLayer.getBounds()
+              if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40] })
+            }
+          } else {
+            const bounds = geoJsonLayer.getBounds()
+            if (bounds.isValid()) {
+              map.fitBounds(bounds, { padding: [40, 40] })
+            }
           }
         } catch (err) {
           console.error('Error parsing geometryJson:', err)

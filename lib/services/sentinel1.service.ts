@@ -598,3 +598,72 @@ export async function processImage(
     return null
   }
 }
+
+// ==================== Catalog Search (Cloud Coverage) ====================
+
+/**
+ * Search Sentinel Hub Catalog for cloud coverage of a given bbox + date range.
+ * Returns the average cloud coverage (%) from matching scenes, or null if unavailable.
+ * Only applicable to optical collections (Sentinel-2, Landsat).
+ */
+export async function searchCatalogCloudCover(
+  workspaceId: string,
+  params: {
+    bbox: [number, number, number, number]
+    dateFrom: string
+    dateTo: string
+    collection: string
+  }
+): Promise<number | null> {
+  // Radar collections don't have cloud coverage
+  if (params.collection.includes('sentinel-1')) return null
+
+  const accessToken = await getAccessToken(workspaceId)
+  if (!accessToken) return null
+
+  const body = {
+    bbox: params.bbox,
+    datetime: `${params.dateFrom}/${params.dateTo}`,
+    collections: [params.collection],
+    limit: 5,
+    fields: {
+      include: ['properties.eo:cloud_cover', 'properties.datetime'],
+    },
+  }
+
+  try {
+    const response = await fetch(SENTINEL_HUB_CATALOG, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    })
+
+    if (!response.ok) return null
+
+    const data = await response.json()
+    const features = data.features || []
+
+    if (features.length === 0) return null
+
+    // Get cloud coverage from matched scenes
+    const cloudValues: number[] = []
+    for (const feature of features) {
+      const cc = feature.properties?.['eo:cloud_cover']
+      if (cc !== undefined && cc !== null) {
+        cloudValues.push(cc)
+      }
+    }
+
+    if (cloudValues.length === 0) return null
+
+    // Return the minimum cloud coverage (best scene for this date range)
+    return Math.round(Math.min(...cloudValues) * 10) / 10
+  } catch (error) {
+    console.error('[SENTINEL1] Catalog search error:', error)
+    return null
+  }
+}

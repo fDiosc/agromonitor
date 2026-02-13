@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
     const fields = await prisma.field.findMany({
       where: { 
         workspaceId: session.workspaceId,
+        parentFieldId: null, // Apenas talhões raiz (não subtalhões)
         ...(producerId && { producerId })
       },
       orderBy: { createdAt: 'desc' },
@@ -49,6 +50,50 @@ export async function GET(request: NextRequest) {
         areaHa: true,
         cropType: true,
         plantingDateInput: true,
+        seasonStartDate: true,
+        editHistory: true,
+        parentFieldId: true,
+        _count: {
+          select: { subFields: true }
+        },
+        subFields: {
+          orderBy: { name: 'asc' },
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            errorMessage: true,
+            city: true,
+            state: true,
+            areaHa: true,
+            cropType: true,
+            parentFieldId: true,
+            createdAt: true,
+            updatedAt: true,
+            processedAt: true,
+            agroData: {
+              select: {
+                areaHa: true,
+                volumeEstimatedKg: true,
+                confidence: true,
+                confidenceScore: true,
+                eosDate: true,
+                sosDate: true,
+                rawAreaData: true,
+                cropPatternStatus: true,
+                aiCropVerificationStatus: true,
+                aiValidationAgreement: true,
+                aiValidationConfidence: true,
+                aiEosAdjustedDate: true,
+                aiValidationResult: true,
+                aiValidationDate: true,
+                detectedPlantingDate: true,
+                detectedCropType: true,
+                detectedConfidence: true,
+              }
+            },
+          }
+        },
         producer: {
           select: {
             id: true,
@@ -108,6 +153,10 @@ export async function GET(request: NextRequest) {
             aiEosAdjustedDate: true,
             aiValidationResult: true, // processed server-side → harvestReady
             aiValidationDate: true,
+            // Detected values (for edit modal reference)
+            detectedPlantingDate: true,
+            detectedCropType: true,
+            detectedConfidence: true,
           }
         },
         analyses: {
@@ -125,51 +174,61 @@ export async function GET(request: NextRequest) {
     // NOTE on DB field names (historical naming):
     //   aiValidationResult  → stores the agreement string ("CONFIRMED" | "QUESTIONED" | "REJECTED")
     //   aiValidationAgreement → stores JSON with detailed agreement data (harvestReadiness, etc.)
-    const processedFields = fields.map(field => {
-      if (!field.agroData) return field
+    const processAgroData = (agroData: any) => {
+      if (!agroData) return null
 
       // Extract fusedEosDate from rawAreaData
       let fusedEosDate: string | null = null
-      if (field.agroData.rawAreaData) {
+      if (agroData.rawAreaData) {
         try {
-          const raw = JSON.parse(field.agroData.rawAreaData)
+          const raw = JSON.parse(agroData.rawAreaData)
           fusedEosDate = raw.fusedEos?.date || null
         } catch { /* ignore parse errors */ }
       }
 
       // Agreement string comes from aiValidationResult (not aiValidationAgreement!)
-      const agreementStr = field.agroData.aiValidationResult ?? null // "CONFIRMED" | "QUESTIONED" | "REJECTED"
+      const agreementStr = agroData.aiValidationResult ?? null
 
       // Extract harvestReady from aiValidationAgreement JSON (the detailed data field)
       let harvestReady: boolean | null = null
-      if (field.agroData.aiValidationAgreement) {
+      if (agroData.aiValidationAgreement) {
         try {
-          const details = JSON.parse(field.agroData.aiValidationAgreement)
+          const details = JSON.parse(agroData.aiValidationAgreement)
           harvestReady = details.harvestReadiness?.ready ?? null
         } catch { /* ignore parse errors */ }
       }
 
       return {
+        areaHa: agroData.areaHa,
+        volumeEstimatedKg: agroData.volumeEstimatedKg,
+        confidence: agroData.confidence,
+        confidenceScore: agroData.confidenceScore,
+        eosDate: agroData.eosDate,
+        sosDate: agroData.sosDate,
+        fusedEosDate,
+        cropPatternStatus: agroData.cropPatternStatus,
+        aiCropVerificationStatus: agroData.aiCropVerificationStatus,
+        aiValidationAgreement: agreementStr,
+        aiValidationConfidence: agroData.aiValidationConfidence,
+        aiEosAdjustedDate: agroData.aiEosAdjustedDate,
+        aiValidationDate: agroData.aiValidationDate,
+        harvestReady,
+        detectedPlantingDate: agroData.detectedPlantingDate,
+        detectedCropType: agroData.detectedCropType,
+        detectedConfidence: agroData.detectedConfidence,
+      }
+    }
+
+    const processedFields = fields.map(field => {
+      const processedSubFields = (field.subFields || []).map(sf => ({
+        ...sf,
+        agroData: processAgroData(sf.agroData),
+      }))
+
+      return {
         ...field,
-        agroData: {
-          areaHa: field.agroData.areaHa,
-          volumeEstimatedKg: field.agroData.volumeEstimatedKg,
-          confidence: field.agroData.confidence,
-          confidenceScore: field.agroData.confidenceScore,
-          eosDate: field.agroData.eosDate,
-          sosDate: field.agroData.sosDate,
-          fusedEosDate,
-          // Crop pattern (algorithmic)
-          cropPatternStatus: field.agroData.cropPatternStatus,
-          // Crop verification (AI Verifier)
-          aiCropVerificationStatus: field.agroData.aiCropVerificationStatus,
-          // AI fields (lightweight, pre-processed)
-          aiValidationAgreement: agreementStr, // Now correctly the agreement string
-          aiValidationConfidence: field.agroData.aiValidationConfidence,
-          aiEosAdjustedDate: field.agroData.aiEosAdjustedDate,
-          aiValidationDate: field.agroData.aiValidationDate,
-          harvestReady,
-        }
+        agroData: processAgroData(field.agroData),
+        subFields: processedSubFields,
       }
     })
 

@@ -10,8 +10,11 @@ interface FieldCoverage {
   city: string | null
   state: string | null
   areaHa: number | null
+  cropType: string | null
   producerId: string | null
   producerName: string | null
+  parentFieldId: string | null
+  subFieldCount: number
   assignedUnitId: string | null
   assignedUnitName: string | null
   assignmentType: 'direct' | 'inherited' | 'automatic' | 'none'
@@ -81,6 +84,9 @@ export async function GET(request: NextRequest) {
           orderBy: {
             distanceKm: 'asc'
           }
+        },
+        _count: {
+          select: { subFields: true }
         }
       }
     })
@@ -125,8 +131,11 @@ export async function GET(request: NextRequest) {
         city: field.city,
         state: field.state,
         areaHa: field.areaHa,
+        cropType: field.cropType,
         producerId: field.producerId,
         producerName: field.producer?.name || null,
+        parentFieldId: field.parentFieldId,
+        subFieldCount: field._count?.subFields || 0,
         assignedUnitId,
         assignedUnitName,
         assignmentType,

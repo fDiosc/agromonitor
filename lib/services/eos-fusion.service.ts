@@ -4,10 +4,10 @@
  * Implementa fusão de múltiplas fontes de dados para previsão de EOS (End of Season / Colheita)
  * 
  * Baseado em metodologias científicas:
- * - PhenoCrop Framework (Sakamoto et al., 2020)
- * - GDD Model for Soybean (Mourtzinis et al., 2017)
- * - NDVI Senescence Detection (Kumudini et al., 2021)
- * - Water Stress Impact (Desclaux et al., 2003)
+ * - PhenoCrop Framework (Diao et al., 2020) — Remote Sensing of Environment, 248
+ * - GDD Model for Soybean (Mourtzinis et al., 2017) — Agric. Forest Meteorology, 239
+ * - NDVI Senescence Detection (Kumudini et al., 2021) — Crop Science, 61(3)
+ * - Water Stress Impact (Brevedan & Egli, 2003) — Crop Science, 43(6), 2083-2095
  * 
  * Referências:
  * - NSF/USDA 2024: Fusão NDVI + GDD fornece 77% acurácia em milho, 71% em soja
